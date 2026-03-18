@@ -1,0 +1,796 @@
+================================================================================
+TÓM TẮT CÁC CHỨC NĂNG THỰC HIỆN - NGUYỄN NGỌC BÌNH (2331540089)
+================================================================================
+
+================================================================================
+1. CHỨC NĂNG: Tạo Đơn Hàng (Orders API)
+================================================================================
+Mức độ sử dụng AI: 40%
+Mức độ hiểu biết/chỉnh sửa: Tính tổng tiền, xử lý nhiều items
+
+File Code Liên Quan:
+- Backend:
+  • /backend/src/controllers/orderController.js (createOrder function)
+  • /backend/src/routes/orderRoutes.js
+  • /backend/src/models/orderModel.js
+  • /backend/src/models/paymentModel.js
+
+- Frontend:
+  • /frontend/src/pages/CheckoutPage.js
+  • /frontend/src/pages/CartPage.js
+  • /frontend/src/services/orderService.js
+
+Luồng Hoạt Động - Tạo Đơn Hàng:
+1. Buyer vào giỏ hàng (CartPage)
+   - Hiển thị danh sách items với:
+     • Tên sản phẩm
+     • Giá unit
+     • Số lượng
+     • Subtotal (price × quantity)
+   - Tính tổng tiền: SUM(item.price × item.quantity)
+
+2. Buyer click "Thanh toán" → CheckoutPage
+   - Hiển thị:
+     • Thông tin giao hàng (tên, điện thoại, địa chỉ)
+     • Danh sách items cuối cùng
+     • Tổng tiền
+     • Chọn phương thức thanh toán (COD/VNPay)
+
+3. Buyer click "Thanh toán" → gửi POST /api/orders
+   ↓
+   Request Body:
+   {
+     user_id: "U123",
+     items: [
+       {
+         product_id: "P1",
+         product_name: "Sản phẩm 1",
+         price: 100000,
+         quantity: 2,
+         subtotal: 200000,
+         seller_id: "S1",
+         product_image: "url"
+       },
+       {
+         product_id: "P2",
+         product_name: "Sản phẩm 2",
+         price: 50000,
+         quantity: 1,
+         subtotal: 50000,
+         seller_id: "S2",
+         product_image: "url"
+       }
+     ],
+     customer_name: "Trần Nguyễn Anh Khoa",
+     customer_phone: "0912345678",
+     customer_email: "user@gmail.com",
+     delivery_address: "123 Nguyễn Huệ, TP.HCM",
+     total_amount: 250000,
+     payment_method: "vnpay" | "cod"
+   }
+
+4. Backend xử lý (createOrder controller):
+   a) Validate input:
+      - Check user_id exists
+      - Check items array not empty
+      - Check mỗi item có product_id, price, quantity
+   
+   b) Enrich items data:
+      - Nếu thiếu seller_id → query Product tìm seller_id
+      - Tính subtotal = price × quantity
+      - Tạo product_image từ database nếu null
+   
+   c) Tính tổng tiền:
+      - total_amount = SUM(enrichedItems[].price × quantity)
+      - Validate total_amount match request body (nếu có)
+   
+   d) Tạo Order document:
+      - order_id = "O" + Date.now() (format: O1764756195525)
+      - order_status = "pending"
+      - payment_status = "pending"
+      - Lưu customer_name, customer_phone, delivery_address
+      - Lưu items array (enriched)
+      - Lưu total_amount
+   
+   e) Tạo Payment record:
+      - payment_id = "PAY" + Date.now()
+      - order_id = vừa tạo
+      - amount = total_amount
+      - method = payment_method
+      - status = "pending"
+   
+   f) Response:
+      {
+        message: "Order created successfully",
+        order: {
+          order_id: "O1764756195525",
+          total_amount: 250000,
+          payment_method: "vnpay"
+        }
+      }
+
+5. Frontend nhận response:
+   - Extract order_id
+   - Clear giỏ hàng
+   - Navigate tới PaymentPage với order_id
+   
+6. Buyer thực hiện thanh toán (VNPay hoặc COD)
+
+Xử Lý Multi-Seller Orders:
+- Một order có thể chứa items từ nhiều seller khác nhau
+- items array = [
+    { product_id, seller_id: "S1", ... },
+    { product_id, seller_id: "S2", ... },
+    { product_id, seller_id: "S1", ... }
+  ]
+- Backend tự động gom items theo seller_id
+- Mỗi seller thấy những items của mình trong order
+
+Tính Toán Tổng Tiền:
+```javascript
+// Frontend (CheckoutPage)
+const total = cart.reduce((sum, item) => 
+  sum + (item.price || 0) * (item.quantity || 1), 0
+);
+// Gửi: total_amount: 250000
+
+// Backend (orderController.createOrder)
+const enrichedItems = items.map(item => ({
+  ...item,
+  subtotal: item.price * item.quantity
+}));
+
+const total = enrichedItems.reduce(
+  (sum, item) => sum + item.price * item.quantity, 0
+);
+// Kết quả: 250000
+```
+
+Chỉnh Sửa Thêm:
+- Validate total_amount từ backend (chống cheat giá)
+- Cộng tiền vận chuyển nếu có
+- Cộng giảm giá/coupon code
+- Validate stock trước khi tạo order
+- Update stock sau khi order created
+- Rollback nếu payment failed
+
+================================================================================
+2. CHỨC NĂNG: Thanh Toán VNPAY (URL + IPN)
+================================================================================
+Mức độ sử dụng AI: 45%
+Mức độ hiểu biết/chỉnh sửa: Debug checksum + callback
+
+File Code Liên Quan:
+- Backend:
+  • /backend/src/controllers/vnpayController.js
+  • /backend/src/routes/vnpayRoutes.js
+  • /backend/src/config/vnpay.config.js
+  • /backend/src/controllers/paymentController.js
+
+- Frontend:
+  • /frontend/src/pages/PaymentPage.js
+  • /frontend/src/pages/PaymentHistoryPage.js
+
+Luồng Hoạt Động - Tạo Payment URL VNPAY:
+1. PaymentPage load:
+   - Lấy order_id từ URL query params
+   - Fetch chi tiết order từ API
+   - Hiển thị:
+     • Mã đơn hàng
+     • Tổng tiền cần thanh toán
+     • Phương thức: VNPAY / COD
+     • Nút "Thanh toán VNPAY"
+
+2. Buyer click "Thanh toán VNPAY" → gửi POST /api/vnpay/create-payment-url
+   ↓
+   Request Body:
+   {
+     order_id: "O1764756195525",
+     amount: 250000,
+     ip_address: "192.168.1.1"
+   }
+
+3. Backend xử lý (vnpayController.createPaymentUrl):
+   a) Validate:
+      - Check order_id exists
+      - Check amount > 0
+      - Check order.payment_status = "pending"
+   
+   b) Tạo VNPay parameters:
+      - vnp_Amount = amount × 100 (VNPAY yêu cầu tính bằng đồng × 100)
+      - vnp_CreateDate = current timestamp (YYYYMMDDHHmmss)
+      - vnp_OrderInfo = `Thanh toan don hang ${order_id}`
+      - vnp_OrderType = "other"
+      - vnp_ReturnUrl = "http://frontend/payment-return"
+      - vnp_TmnCode = VNPAY_TMN_CODE (từ config)
+      - vnp_TransactionNo = Date.now()
+      - vnp_IpAddr = ip_address
+   
+   c) Tính checksum (secure hash):
+      - Sort tất cả vnp_* params theo key alphabetically
+      - Nối string: "vnp_Amount=...&vnp_CreateDate=...&..."
+      - Hash = HMAC-SHA512(sortedString, vnp_HashSecret)
+      - Append: &vnp_SecureHash=hash
+   
+   d) Tạo payment URL:
+      - url = VNPAY_GATEWAY_URL + "?" + encoded_params
+      - Ví dụ: https://sandbox.vnpayment.vn/paygate?vnp_Amount=...
+   
+   e) Response:
+      {
+        paymentUrl: "https://sandbox.vnpayment.vn/paygate?..."
+      }
+
+4. Frontend redirect tới payment URL:
+   - window.location.href = paymentUrl
+   - Buyer login/xác thực tại VNPAY
+   - Nhập OTP hoặc 3D Secure
+   - Thanh toán thành công hoặc thất bại
+
+5. VNPAY redirect về Return URL:
+   - Redirect tới: /payment-return?vnp_ResponseCode=...&vnp_TransactionNo=...
+   - Frontend gửi POST /api/vnpay/verify-payment với query params
+
+Luồng Hoạt Động - IPN (Instant Payment Notification) - Webhook:
+1. VNPAY gửi POST request tới:
+   - URL: /api/vnpay/ipn
+   - Body: { vnp_Amount, vnp_TransactionNo, vnp_ResponseCode, ... }
+
+2. Backend xử lý IPN (vnpayController.handleIPN):
+   a) Verify checksum:
+      - Extract vnp_SecureHash từ params
+      - Remove vnp_SecureHash from params
+      - Tính lại hash = HMAC-SHA512(...)
+      - So sánh: hash === vnp_SecureHash
+      - Nếu không match → return vnp_Message: "Invalid checksum"
+   
+   b) Validate transaction:
+      - Check vnp_ResponseCode = "00" (thành công)
+      - Check vnp_Amount match order amount
+      - Check duplicate transaction (prevent double charge)
+   
+   c) Update Order + Payment:
+      - Tìm order theo order_id (từ vnp_OrderInfo parse)
+      - Update Order:
+        • payment_status = "paid"
+        • order_status = "confirmed"
+        • vnp_response_code = vnp_ResponseCode
+        • vnp_transaction_no = vnp_TransactionNo
+      - Update Payment:
+        • status = "success"
+        • transaction_no = vnp_TransactionNo
+   
+   d) Response (phải response nhanh):
+      {
+        vnp_ResponseCode: "00",
+        vnp_Message: "Confirm received"
+      }
+
+3. Frontend xử lý Return URL:
+   a) Kiểm tra vnp_ResponseCode:
+      - "00" = Thành công → hiển thị "Thanh toán thành công"
+      - "24" = Đang chờ xác nhận
+      - Khác = Thất bại
+   
+   b) Fetch lại order details từ API
+      - Kiểm tra payment_status = "paid"
+      - Hiển thị order confirmation
+   
+   c) Redirect tới OrderDetailPage hoặc OrderListPage
+
+Checksum Debug:
+```javascript
+// Các bước tính checksum:
+1. Các parameters VNPay yêu cầu:
+   vnp_Amount, vnp_CreateDate, vnp_IpAddr, vnp_Locale, vnp_OrderInfo,
+   vnp_OrderType, vnp_ReturnUrl, vnp_TmnCode, vnp_TransactionNo, vnp_Version
+
+2. Sort alphabetically:
+   const sortedKeys = Object.keys(params).sort();
+   const sortedString = sortedKeys
+     .map(key => `${key}=${encodeURIComponent(params[key])}`)
+     .join('&');
+
+3. Hash:
+   const hmac = crypto.createHmac('sha512', hashSecret);
+   const hash = hmac.update(sortedString).digest('hex');
+
+4. Append:
+   url += '&vnp_SecureHash=' + hash;
+```
+
+Chỉnh Sửa Thêm:
+- Thêm retry logic nếu IPN timeout
+- Thêm logging cho mỗi payment attempt
+- Thêm email notification khi payment success/failed
+- Thêm refund handling
+- Thêm payment history
+- Sync payment status từ VNPAY periodically
+
+================================================================================
+3. CHỨC NĂNG: Seller Xem Đơn Bán Ra
+================================================================================
+Mức độ sử dụng AI: 40%
+Mức độ hiểu biết/chỉnh sửa: Tách order theo seller
+
+File Code Liên Quan:
+- Backend:
+  • /backend/src/controllers/sellerController.js (getSellerOrders function)
+  • /backend/src/routes/sellerRoutes.js
+  • /backend/src/models/orderModel.js
+
+- Frontend:
+  • /frontend/src/pages/SellerDashboardPage.js (Orders tab)
+  • /frontend/src/components/OrderCard.js
+
+Luồng Hoạt Động - Seller Xem Danh Sách Đơn:
+1. Seller login → SellerDashboardPage
+2. Click tab "Orders" → hiển thị danh sách đơn bán ra
+
+3. Frontend gửi GET /api/seller/orders
+   ↓
+   Header: { Authorization: "Bearer token" }
+   (authMiddleware extract seller_id từ token)
+
+4. Backend xử lý (sellerController.getSellerOrders):
+   a) Verify seller role từ authMiddleware
+   
+   b) Tìm tất cả orders chứa items của seller này:
+      ```javascript
+      const orders = await Order.find({
+        "items.seller_id": seller_id
+      });
+      ```
+   
+   c) Với mỗi order, lọc chỉ items của seller:
+      ```javascript
+      const sellerOrders = orders.map(order => ({
+        ...order.toObject(),
+        items: order.items.filter(item => item.seller_id === seller_id),
+        // Chỉ tính tiền từ items của seller
+        seller_total: order.items
+          .filter(item => item.seller_id === seller_id)
+          .reduce((sum, item) => sum + item.subtotal, 0)
+      }));
+      ```
+   
+   d) Sort by created_at descending (mới nhất trước)
+   
+   e) Response:
+      {
+        orders: [
+          {
+            order_id: "O1764756195525",
+            user_id: "U123",
+            items: [ // Chỉ items của seller này
+              { product_id, product_name, price, quantity, subtotal, ... }
+            ],
+            total_amount: 250000, // tổng order (bao gồm items khác)
+            seller_total: 100000, // chỉ total của seller
+            payment_status: "pending" | "paid",
+            order_status: "pending" | "confirmed" | "shipping" | "completed",
+            customer_name, customer_phone, delivery_address,
+            created_at
+          },
+          ...
+        ]
+      }
+
+5. Frontend hiển thị Orders tab:
+   - Danh sách order cards, mỗi card hiển thị:
+     • Order ID
+     • Tên khách (customer_name)
+     • Địa chỉ (delivery_address)
+     • Items của seller này (filtered)
+     • Tổng tiền của seller (seller_total)
+     • Trạng thái thanh toán (payment_status)
+     • Trạng thái đơn (order_status)
+     • Nút "Duyệt đơn" (nếu payment_status = pending)
+     • Dropdown cập nhật trạng thái
+
+Tách Order Theo Seller - Chi tiết:
+Giả sử:
+- Order O123 có 3 items:
+  • Item 1: seller_id = S1, subtotal = 100000
+  • Item 2: seller_id = S2, subtotal = 50000
+  • Item 3: seller_id = S1, subtotal = 75000
+
+- Seller S1 request GET /api/seller/orders → nhận:
+  {
+    order_id: "O123",
+    total_amount: 225000, // tổng cộng
+    seller_total: 175000, // chỉ S1
+    items: [
+      { product_id, seller_id: "S1", subtotal: 100000 },
+      { product_id, seller_id: "S1", subtotal: 75000 }
+    ],
+    ...
+  }
+
+- Seller S2 request → nhận:
+  {
+    order_id: "O123",
+    total_amount: 225000,
+    seller_total: 50000,
+    items: [
+      { product_id, seller_id: "S2", subtotal: 50000 }
+    ],
+    ...
+  }
+
+Chỉnh Sửa Thêm:
+- Thêm pagination (page, limit)
+- Thêm filter by status (pending, confirmed, shipping, completed)
+- Thêm filter by date range
+- Thêm search by order_id, customer_name
+- Thêm export danh sách orders
+- Thêm earning tracking per order
+
+================================================================================
+4. CHỨC NĂNG: Admin Dashboard Thống Kê
+================================================================================
+Mức độ sử dụng AI: 50%
+Mức độ hiểu biết/chỉnh sửa: Tổng hợp dữ liệu
+
+File Code Liên Quan:
+- Backend:
+  • /backend/src/controllers/sellerController.js (getDashboard function)
+  • /backend/src/controllers/orderController.js (getStatistics)
+  • /backend/src/routes/sellerRoutes.js
+  • /backend/src/models/orderModel.js
+  • /backend/src/models/userModel.js
+  • /backend/src/models/productModel.js
+  • /backend/src/models/paymentModel.js
+
+- Frontend:
+  • /frontend/src/pages/AdminDashboardPage.js
+  • /frontend/src/pages/SellerDashboardPage.js (Overview tab)
+
+Luồng Hoạt Động - Admin Dashboard:
+1. Admin login → AdminDashboardPage
+2. Hiển thị Overview tab mặc định
+   
+3. Backend GET /api/seller/dashboard (hoặc /api/admin/dashboard)
+   ↓
+   Response:
+   {
+     dashboard: {
+       total_users: 1234,
+       total_sellers: 45,
+       total_buyers: 1189,
+       total_products: 567,
+       
+       // Orders statistics
+       total_orders: 890,
+       orders_pending: 45,
+       orders_confirmed: 120,
+       orders_shipping: 230,
+       orders_completed: 495,
+       
+       // Revenue statistics
+       total_revenue: 125500000, // VND
+       revenue_today: 2500000,
+       revenue_week: 15000000,
+       revenue_month: 95000000,
+       
+       // Payment statistics
+       total_paid: 120000000,
+       total_pending: 5500000,
+       total_failed: 0,
+       
+       // Top metrics
+       top_sellers: [
+         { seller_id, seller_name, total_orders, total_revenue },
+         ...
+       ],
+       top_products: [
+         { product_id, product_name, sold_count, total_revenue },
+         ...
+       ],
+       
+       // Recent activity
+       recent_orders: [
+         { order_id, user_id, total_amount, created_at },
+         ...
+       ]
+     }
+   }
+
+4. Frontend hiển thị Dashboard:
+   - Key Statistics (4 cards):
+     • Total Users
+     • Total Orders
+     • Total Revenue
+     • Paid Orders (%)
+   
+   - Order Status Distribution:
+     • Pie Chart hoặc Bar chart:
+       - Pending: 45
+       - Confirmed: 120
+       - Shipping: 230
+       - Completed: 495
+   
+   - Revenue Chart:
+     • Line chart: Revenue by date/week/month
+     • Today: 2.5M
+     • This Week: 15M
+     • This Month: 95M
+   
+   - Top Sellers:
+     • Table: seller_name, total_orders, total_revenue
+   
+   - Top Products:
+     • Table: product_name, sold_count, total_revenue
+   
+   - Recent Orders:
+     • List: order_id, customer, amount, date
+
+Tính Toán Thống Kê - Chi tiết:
+```javascript
+// Backend (sellerController.getDashboard)
+
+// 1. User Statistics
+const totalUsers = await User.countDocuments();
+const totalSellers = await User.countDocuments({ role: "seller" });
+const totalBuyers = await User.countDocuments({ role: "buyer" });
+
+// 2. Product Statistics
+const totalProducts = await Product.countDocuments();
+
+// 3. Order Statistics
+const allOrders = await Order.find();
+const totalOrders = allOrders.length;
+const orders_pending = allOrders.filter(o => o.order_status === 'pending').length;
+const orders_confirmed = allOrders.filter(o => o.order_status === 'confirmed').length;
+const orders_shipping = allOrders.filter(o => o.order_status === 'shipping').length;
+const orders_completed = allOrders.filter(o => o.order_status === 'completed').length;
+
+// 4. Revenue Statistics
+const totalRevenue = allOrders.reduce((sum, o) => sum + o.total_amount, 0);
+
+// Revenue by period
+const today = new Date();
+today.setHours(0, 0, 0, 0);
+
+const revenue_today = allOrders
+  .filter(o => new Date(o.created_at) >= today)
+  .reduce((sum, o) => sum + o.total_amount, 0);
+
+const weekAgo = new Date(today);
+weekAgo.setDate(weekAgo.getDate() - 7);
+
+const revenue_week = allOrders
+  .filter(o => new Date(o.created_at) >= weekAgo)
+  .reduce((sum, o) => sum + o.total_amount, 0);
+
+// 5. Payment Statistics
+const allPayments = await Payment.find();
+const total_paid = allPayments
+  .filter(p => p.status === 'success')
+  .reduce((sum, p) => sum + p.amount, 0);
+
+const total_pending = allPayments
+  .filter(p => p.status === 'pending')
+  .reduce((sum, p) => sum + p.amount, 0);
+
+// 6. Top Sellers (by revenue)
+const topSellers = [];
+const sellers = await User.find({ role: "seller" });
+for (let seller of sellers) {
+  const sellerOrders = allOrders.filter(o =>
+    o.items.some(item => item.seller_id === seller.user_id)
+  );
+  const sellerRevenue = sellerOrders.reduce((sum, o) => {
+    const sellerItems = o.items.filter(i => i.seller_id === seller.user_id);
+    return sum + sellerItems.reduce((s, i) => s + i.subtotal, 0);
+  }, 0);
+  
+  topSellers.push({
+    seller_id: seller.user_id,
+    seller_name: seller.full_name,
+    total_orders: sellerOrders.length,
+    total_revenue: sellerRevenue
+  });
+}
+topSellers.sort((a, b) => b.total_revenue - a.total_revenue);
+
+// 7. Top Products (by sold count)
+const topProducts = [];
+const products = await Product.find();
+for (let product of products) {
+  let soldCount = 0;
+  let productRevenue = 0;
+  
+  allOrders.forEach(order => {
+    order.items.forEach(item => {
+      if (item.product_id === product.product_id) {
+        soldCount += item.quantity;
+        productRevenue += item.subtotal;
+      }
+    });
+  });
+  
+  topProducts.push({
+    product_id: product.product_id,
+    product_name: product.name,
+    sold_count: soldCount,
+    total_revenue: productRevenue
+  });
+}
+topProducts.sort((a, b) => b.total_revenue - a.total_revenue);
+```
+
+Chỉnh Sửa Thêm:
+- Thêm chart library (Chart.js, ApexCharts)
+- Thêm real-time update (WebSocket)
+- Thêm filter by date range
+- Thêm export report (PDF, Excel)
+- Thêm comparison với tháng trước
+- Thêm dashboard customization
+- Thêm email report hàng ngày
+- Optimize query với aggregation pipeline
+
+================================================================================
+5. CÔNG NGHỆ STACK
+================================================================================
+Backend:
+- Node.js + Express.js
+- MongoDB + Mongoose
+- Crypto (HMAC-SHA512 cho VNPAY)
+- JWT authentication
+- Middleware: errorHandler, authMiddleware, logging
+
+Frontend:
+- React 18
+- React Router v6
+- Axios (HTTP client)
+- Tailwind CSS (styling)
+- React Hooks (state management)
+- Auto-refresh (setInterval polling)
+
+Payment Gateway:
+- VNPAY (Vietnamese payment)
+- IPN webhook handling
+- Checksum verification (SHA512)
+
+================================================================================
+6. DATABASE QUERIES OPTIMIZATION
+================================================================================
+Order Queries:
+- Index on user_id, order_status, payment_status, created_at
+- Index on items.seller_id (for seller filtering)
+
+Payment Queries:
+- Index on order_id, status, created_at
+
+User Queries:
+- Index on role, email, created_at
+
+Product Queries:
+- Index on seller_id, category, status
+
+Aggregation Pipeline (Dashboard):
+```javascript
+// Group by order_status
+Order.aggregate([
+  { $group: {
+    _id: "$order_status",
+    count: { $sum: 1 },
+    revenue: { $sum: "$total_amount" }
+  }},
+  { $sort: { _id: 1 } }
+])
+
+// Top sellers by revenue
+Order.aggregate([
+  { $unwind: "$items" },
+  { $group: {
+    _id: "$items.seller_id",
+    total_revenue: { $sum: "$items.subtotal" },
+    order_count: { $sum: 1 }
+  }},
+  { $sort: { total_revenue: -1 } },
+  { $limit: 10 }
+])
+```
+
+================================================================================
+7. API ENDPOINTS (Key)
+================================================================================
+Orders:
+- POST /api/orders (create order - buyer)
+- GET /api/orders/my (get my orders - buyer)
+- GET /api/orders/:id (get order detail)
+- GET /api/seller/orders (get orders for seller)
+
+VNPAY:
+- POST /api/vnpay/create-payment-url (tạo payment URL)
+- POST /api/vnpay/verify-payment (verify return URL)
+- POST /api/vnpay/ipn (webhook - VNPAY callback)
+
+Dashboard:
+- GET /api/seller/dashboard (thống kê seller/admin)
+- GET /api/seller/earnings (doanh thu seller)
+
+================================================================================
+8. ERROR HANDLING
+================================================================================
+Order Creation:
+- Missing user_id, items, customer_info → 400 Bad Request
+- Order amount mismatch → 400 Bad Request
+- Product not found → 404 Not Found
+- Out of stock → 409 Conflict
+
+VNPAY:
+- Invalid checksum → Response vnp_ResponseCode: "97"
+- Amount mismatch → Response vnp_ResponseCode: "98"
+- Duplicate transaction → Response vnp_ResponseCode: "99"
+- VNPAY API error → 503 Service Unavailable
+
+Seller Orders:
+- Unauthorized (not seller) → 403 Forbidden
+- Order not found → 404 Not Found
+
+Dashboard:
+- Unauthorized (not admin/seller) → 403 Forbidden
+- Database error → 500 Internal Server Error
+
+================================================================================
+9. SECURITY CONSIDERATIONS
+================================================================================
+VNPAY Integration:
+- Verify checksum mỗi lần (prevent tampering)
+- Validate amount từ database (prevent price manipulation)
+- Use HTTPS only
+- Store vnp_HashSecret in environment variable
+- Log mỗi transaction attempt
+
+Order Creation:
+- Verify user ownership
+- Validate items data từ database (price)
+- Calculate total từ server (don't trust client)
+- Prevent duplicate orders (idempotency key)
+
+Seller Dashboard:
+- Only show orders chứa items của seller
+- Only allow update nếu seller có items
+- Log mỗi status change
+
+================================================================================
+10. TESTING CHECKLIST
+================================================================================
+Order Creation:
+☐ Single item order
+☐ Multi-item order
+☐ Multi-seller order
+☐ Total amount calculation
+☐ Missing fields validation
+☐ Stock check
+
+VNPAY Payment:
+☐ Create payment URL
+☐ Return URL callback
+☐ IPN webhook callback
+☐ Checksum verification
+☐ Amount validation
+☐ Duplicate prevention
+☐ Timeout handling
+
+Seller Dashboard:
+☐ Get seller orders
+☐ Filter by seller_id
+☐ Calculate seller earnings
+☐ Approve/update order status
+☐ Multi-seller orders handling
+
+Dashboard Statistics:
+☐ Total users count
+☐ Order distribution
+☐ Revenue calculation
+☐ Top sellers ranking
+☐ Top products ranking
+☐ Performance optimization
+
+================================================================================
+HẾT - TỔNG HỢP CÁC CHỨC NĂNG NGUYỄN NGỌC BÌNH (2331540089)
+================================================================================

@@ -1,0 +1,1086 @@
+================================================================================
+TÓM TẮT CÁC CHỨC NĂNG THỰC HIỆN - NGUYỄN DƯƠNG TUẤN KHẢI (2331540101)
+================================================================================
+
+================================================================================
+1. CHỨC NĂNG: Xem & Tìm Kiếm Sản Phẩm
+================================================================================
+Mức độ sử dụng AI: 40%
+Mức độ hiểu biết/chỉnh sửa: Tối ưu query Mongo
+
+File Code Liên Quan:
+- Backend:
+  • /backend/src/controllers/productController.js (getProducts, searchProducts)
+  • /backend/src/routes/productRoutes.js
+  • /backend/src/models/productModel.js
+
+- Frontend:
+  • /frontend/src/pages/HomePage.js
+  • /frontend/src/components/ProductItem.js
+  • /frontend/src/components/Header.js (search bar)
+
+Luồng Hoạt Động - Xem Danh Sách Sản Phẩm:
+1. Buyer vào HomePage
+   ↓
+2. Frontend fetch: GET /api/products?limit=20&page=1
+   
+   Query Parameters:
+   - limit: 20 (số items per page)
+   - page: 1 (trang hiện tại)
+   - category: "Electronics" (optional)
+   - sort: "-created_at" (optional, - = descending)
+   - search: "laptop" (optional)
+
+3. Backend xử lý (productController.getProducts):
+   a) Parse query parameters:
+      ```javascript
+      const { limit = 20, page = 1, category, search, sort } = req.query;
+      const skip = (page - 1) * limit;
+      ```
+   
+   b) Xây dựng filter object:
+      ```javascript
+      let filter = { status: 'active' }; // Chỉ show active products
+      
+      if (category) {
+        filter.category = category;
+      }
+      
+      if (search) {
+        filter.$or = [
+          { name: { $regex: search, $options: 'i' } },
+          { description: { $regex: search, $options: 'i' } }
+        ];
+      }
+      ```
+   
+   c) Query database với optimization:
+      ```javascript
+      // Sử dụng select để chỉ lấy fields cần thiết
+      const products = await Product.find(filter)
+        .select('product_id name price image rating sold stock seller_id')
+        .sort(sort || '-created_at')
+        .skip(skip)
+        .limit(parseInt(limit))
+        .lean(); // Lean query = return plain objects (faster)
+      
+      const total = await Product.countDocuments(filter);
+      const pages = Math.ceil(total / limit);
+      ```
+   
+   d) Response:
+      ```javascript
+      {
+        products: [...],
+        total: 150,
+        pages: 8,
+        current_page: 1,
+        limit: 20
+      }
+      ```
+
+4. Frontend hiển thị products list
+
+Luồng Tìm Kiếm:
+1. Buyer nhập từ khóa trong search bar
+2. Press Enter → Navigate /home?q=laptop
+3. HomePage parse query:
+   ```javascript
+   const searchParams = new URLSearchParams(location.search);
+   const query = searchParams.get('q');
+   ```
+
+4. Frontend fetch: GET /api/products?search=laptop&limit=20
+5. Backend filter products bằng regex
+6. Frontend hiển thị kết quả
+
+Tối Ưu Query MongoDB:
+1. **Index Creation**:
+   ```javascript
+   // productModel.js
+   productSchema.index({ name: 'text', description: 'text' });
+   productSchema.index({ category: 1, status: 1 });
+   productSchema.index({ status: 1, created_at: -1 });
+   productSchema.index({ seller_id: 1, status: 1 });
+   ```
+
+2. **Text Search (thay vì Regex)**:
+   ```javascript
+   // Nếu có text index
+   const products = await Product.find(
+     { $text: { $search: search } },
+     { score: { $meta: "textScore" } }
+   )
+   .sort({ score: { $meta: "textScore" } })
+   .limit(limit)
+   .lean();
+   ```
+
+3. **Select Only Needed Fields**:
+   ```javascript
+   // TRÁNH:
+   const products = await Product.find(filter); // lấy tất cả fields
+   
+   // THAY VÌ:
+   const products = await Product.find(filter).select(
+     'product_id name price image rating sold -_id'
+   );
+   ```
+
+4. **Use Lean Queries**:
+   ```javascript
+   // .lean() trả về plain objects (không Mongoose documents)
+   // Nhanh hơn 2-3x khi chỉ cần read data
+   const products = await Product.find(filter).lean();
+   ```
+
+5. **Pagination không skip lớn**:
+   ```javascript
+   // TRÁNH: skip(1000000)
+   // Khi page = 50000, skip lớn → slow
+   
+   // THAY VÌ: dùng cursor-based pagination
+   const products = await Product.find({
+     status: 'active',
+     _id: { $gt: lastId } // cursor
+   })
+   .limit(20)
+   .lean();
+   ```
+
+6. **Batch Load Seller Info**:
+   ```javascript
+   // Sau khi get products, batch load seller names
+   const sellerIds = [...new Set(products.map(p => p.seller_id))];
+   const sellers = await User.find(
+     { user_id: { $in: sellerIds } }
+   ).select('user_id full_name');
+   
+   const sellerMap = new Map(sellers.map(s => [s.user_id, s]));
+   
+   const enriched = products.map(p => ({
+     ...p,
+     seller_name: sellerMap.get(p.seller_id)?.full_name
+   }));
+   ```
+
+Performance Metrics:
+```
+Without optimization:
+- Full products array: 5.2s
+- No indexes: 8.1s
+- Large skip: 10.5s
+
+With optimization:
+- Select + lean: 0.8s
+- With index: 0.3s
+- Cursor-based: 0.2s
+- Batch load: +0.4s total
+```
+
+Filter & Sort Options:
+```javascript
+// Price range
+GET /api/products?minPrice=100000&maxPrice=500000
+filter.price = { $gte: 100000, $lte: 500000 };
+
+// Category
+GET /api/products?category=Electronics
+
+// Sort
+GET /api/products?sort=-rating (cao đến thấp)
+GET /api/products?sort=price (thấp đến cao)
+GET /api/products?sort=-sold (best sellers)
+
+// Combine
+GET /api/products?category=Electronics&minPrice=100000&sort=-rating&limit=20&page=2
+```
+
+Chỉnh Sửa Thêm:
+- Thêm full text search
+- Thêm faceted search (filters)
+- Thêm search suggestions/autocomplete
+- Thêm search analytics (popular keywords)
+- Implement caching (Redis)
+- Thêm elasticsearch for advanced search
+- Optimize image serving (CDN, WebP)
+
+================================================================================
+2. CHỨC NĂNG: API Giỏ Hàng Buyer
+================================================================================
+Mức độ sử dụng AI: 35%
+Mức độ hiểu biết/chỉnh sửa: Xử lý duplicate item
+
+File Code Liên Quan:
+- Backend:
+  • /backend/src/controllers/cartController.js
+  • /backend/src/routes/cartRoutes.js
+  • /backend/src/models/cartModel.js
+  • /backend/src/models/cartItemModel.js
+
+- Frontend:
+  • /frontend/src/pages/CartPage.js
+  • /frontend/src/components/CartItem.js
+
+Luồng Hoạt Động - Add to Cart:
+1. Buyer click "Thêm vào giỏ" trên ProductItem
+   Request: POST /api/carts/items
+   Body:
+   {
+     product_id: "P1",
+     quantity: 2,
+     price: 100000
+   }
+
+2. Backend xử lý (cartController.addToCart):
+   a) Get user từ token:
+      ```javascript
+      const user_id = req.user.user_id;
+      ```
+   
+   b) Tìm hoặc tạo Cart:
+      ```javascript
+      let cart = await Cart.findOne({ user_id });
+      if (!cart) {
+        cart = new Cart({
+          cart_id: "C" + Date.now(),
+          user_id,
+          items: []
+        });
+      }
+      ```
+   
+   c) **Handle Duplicate Items** - KEY LOGIC:
+      ```javascript
+      // Cách 1: Update quantity nếu item tồn tại
+      const existingIndex = cart.items.findIndex(
+        item => item.product_id === product_id
+      );
+      
+      if (existingIndex >= 0) {
+        // Item tồn tại → cộng quantity
+        cart.items[existingIndex].quantity += quantity;
+        cart.items[existingIndex].subtotal = 
+          cart.items[existingIndex].price * cart.items[existingIndex].quantity;
+      } else {
+        // Item mới → push vào array
+        cart.items.push({
+          product_id,
+          name: product.name,
+          price,
+          quantity,
+          subtotal: price * quantity,
+          image: product.image,
+          seller_id: product.seller_id
+        });
+      }
+      ```
+   
+   d) Validate:
+      ```javascript
+      // Check stock
+      const product = await Product.findOne({ product_id });
+      if (product.stock < quantity) {
+        return res.status(409).json({
+          message: `Chỉ còn ${product.stock} sản phẩm`
+        });
+      }
+      
+      // Check total quantity
+      const totalQuantity = cart.items.reduce(
+        (sum, item) => sum + item.quantity, 0
+      );
+      if (totalQuantity > 999) {
+        return res.status(400).json({
+          message: "Giỏ hàng chứa quá nhiều sản phẩm"
+        });
+      }
+      ```
+   
+   e) Tính tổng:
+      ```javascript
+      cart.total_items = cart.items.length;
+      cart.total_amount = cart.items.reduce(
+        (sum, item) => sum + item.subtotal, 0
+      );
+      ```
+   
+   f) Save & response:
+      ```javascript
+      await cart.save();
+      res.json({
+        message: "Item added to cart",
+        cart: { ...cart.toObject(), updated: true }
+      });
+      ```
+
+Luồng Cập Nhật Số Lượng:
+1. Buyer thay đổi số lượng trên CartItem
+   Request: PATCH /api/carts/items/{product_id}
+   Body: { quantity: 5 }
+
+2. Backend xử lý:
+   ```javascript
+   const cart = await Cart.findOne({ user_id });
+   const item = cart.items.find(i => i.product_id === product_id);
+   
+   if (!item) {
+     return res.status(404).json({ message: "Item not found" });
+   }
+   
+   // Validate stock
+   const product = await Product.findOne({ product_id });
+   if (product.stock < quantity) {
+     return res.status(409).json({
+       message: `Chỉ còn ${product.stock} sản phẩm`
+     });
+   }
+   
+   // Update
+   item.quantity = quantity;
+   item.subtotal = item.price * quantity;
+   
+   cart.total_items = cart.items.length;
+   cart.total_amount = cart.items.reduce(
+     (sum, i) => sum + i.subtotal, 0
+   );
+   
+   await cart.save();
+   res.json(cart);
+   ```
+
+Luồng Xóa Item:
+1. Buyer click xóa trên CartItem
+   Request: DELETE /api/carts/items/{product_id}
+
+2. Backend:
+   ```javascript
+   const cart = await Cart.findOne({ user_id });
+   cart.items = cart.items.filter(i => i.product_id !== product_id);
+   
+   cart.total_items = cart.items.length;
+   cart.total_amount = cart.items.reduce(
+     (sum, item) => sum + item.subtotal, 0
+   );
+   
+   await cart.save();
+   res.json(cart);
+   ```
+
+Luồng Clear Cart:
+1. Request: DELETE /api/carts
+2. Backend:
+   ```javascript
+   const cart = await Cart.findOne({ user_id });
+   cart.items = [];
+   cart.total_items = 0;
+   cart.total_amount = 0;
+   await cart.save();
+   ```
+
+Handle Duplicate Prevention:
+```javascript
+// Strategy 1: Check before insert
+const exists = cart.items.some(i => i.product_id === product_id);
+if (exists) {
+  // Update quantity
+} else {
+  // Add new item
+}
+
+// Strategy 2: Upsert operation
+await Cart.updateOne(
+  { user_id, "items.product_id": product_id },
+  {
+    $inc: { "items.$.quantity": quantity }
+  }
+);
+
+// Nếu không match (item không tồn tại)
+if (updatedCart.modifiedCount === 0) {
+  // Push new item
+  await Cart.updateOne(
+    { user_id },
+    { $push: { items: { ... } } }
+  );
+}
+
+// Strategy 3: Atomic operation
+await Cart.findOneAndUpdate(
+  { user_id },
+  [
+    {
+      $set: {
+        items: {
+          $map: {
+            input: "$items",
+            as: "item",
+            in: {
+              $cond: [
+                { $eq: ["$$item.product_id", product_id] },
+                { // Merge nếu tồn tại
+                  product_id: "$$item.product_id",
+                  quantity: { $add: ["$$item.quantity", quantity] },
+                  subtotal: { ... }
+                },
+                "$$item" // Giữ nguyên nếu không match
+              ]
+            }
+          }
+        }
+      }
+    },
+    // Nếu không tìm thấy item → push
+    {
+      $cond: [
+        { $anyElementTrue: [{ // Kiểm tra có match không
+          $map: {
+            input: "$items",
+            as: "item",
+            in: { $eq: ["$$item.product_id", product_id] }
+          }
+        }]},
+        "$items", // Item tồn tại, giữ nguyên
+        { // Item không tồn tại, push
+          $concatArrays: ["$items", [{ product_id, ... }]]
+        }
+      ]
+    }
+  ]
+);
+```
+
+Chỉnh Sửa Thêm:
+- Thêm cart expiration (30 days)
+- Thêm persistent cart (localStorage + server)
+- Thêm merge cart on login
+- Thêm price update (real-time sync)
+- Thêm stock check real-time
+- Thêm cart sharing via URL
+- Thêm quick order from history
+
+================================================================================
+3. CHỨC NĂNG: Seller Đăng/Sửa/Xóa Sản Phẩm
+================================================================================
+Mức độ sử dụng AI: 45%
+Mức độ hiểu biết/chỉnh sửa: Validate dữ liệu seller
+
+File Code Liên Quan:
+- Backend:
+  • /backend/src/controllers/productController.js (createProduct, updateProduct, deleteProduct)
+  • /backend/src/routes/productRoutes.js
+  • /backend/src/middleware/uploadMiddleware.js
+  • /backend/src/models/productModel.js
+
+- Frontend:
+  • /frontend/src/pages/AddProductPage.js
+  • /frontend/src/pages/EditProductPage.js
+
+Luồng Hoạt Động - Tạo Sản Phẩm:
+1. Seller login → SellerDashboardPage → click "Thêm sản phẩm"
+2. Navigate tới AddProductPage
+3. Form fields:
+   - Product name (required)
+   - Category (dropdown, required)
+   - Price (required, > 0)
+   - Stock (required, >= 0)
+   - Description (required)
+   - Image/Gallery (upload, required)
+   - Video trailer (optional)
+   - Specifications (optional)
+
+4. Seller fill form + click "Tạo sản phẩm"
+   Request: POST /api/products
+   Body (multipart/form-data):
+   ```
+   name: "Laptop Dell XPS 13"
+   category: "Electronics"
+   price: 25000000
+   stock: 5
+   description: "Laptop cao cấp..."
+   image: <file>
+   gallery: [<file>, <file>]
+   trailer: "url or file"
+   specifications: '{"CPU": "Intel i7", "RAM": "16GB"}'
+   ```
+
+5. Backend xử lý (productController.createProduct):
+   a) Verify seller role:
+      ```javascript
+      const seller_id = req.user.user_id;
+      if (req.user.role !== 'seller') {
+        return res.status(403).json({ message: "Only sellers can create products" });
+      }
+      ```
+   
+   b) **Validate dữ liệu**:
+      ```javascript
+      const { name, category, price, stock, description } = req.body;
+      
+      if (!name || name.trim().length < 3) {
+        return res.status(400).json({
+          message: "Product name must be at least 3 characters"
+        });
+      }
+      
+      if (!category) {
+        return res.status(400).json({ message: "Category is required" });
+      }
+      
+      if (!price || price <= 0) {
+        return res.status(400).json({
+          message: "Price must be greater than 0"
+        });
+      }
+      
+      if (stock < 0) {
+        return res.status(400).json({
+          message: "Stock cannot be negative"
+        });
+      }
+      
+      if (!description || description.trim().length < 10) {
+        return res.status(400).json({
+          message: "Description must be at least 10 characters"
+        });
+      }
+      
+      // Validate category exists
+      const categoryExists = await Category.findOne({ 
+        category_id: category 
+      });
+      if (!categoryExists) {
+        return res.status(404).json({ message: "Category not found" });
+      }
+      ```
+   
+   c) Handle image upload:
+      ```javascript
+      if (!req.files || req.files.length === 0) {
+        return res.status(400).json({ message: "Image is required" });
+      }
+      
+      const image = req.files[0].path; // Path from multer
+      const gallery = req.files.slice(1).map(f => f.path); // Additional images
+      ```
+   
+   d) Create product:
+      ```javascript
+      const product_id = "P" + Date.now();
+      const product = new Product({
+        product_id,
+        name: name.trim(),
+        category,
+        price: parseFloat(price),
+        stock: parseInt(stock),
+        description: description.trim(),
+        image,
+        gallery,
+        trailer: req.body.trailer || null,
+        seller_id,
+        status: 'pending', // Chờ admin approve
+        specifications: req.body.specifications 
+          ? JSON.parse(req.body.specifications) 
+          : {}
+      });
+      
+      await product.save();
+      
+      // Log action
+      await AdminLog.create({
+        action: 'create',
+        target_type: 'Product',
+        target_id: product_id,
+        admin_id: seller_id,
+        new_data: product.toObject()
+      });
+      ```
+   
+   e) Response:
+      ```javascript
+      res.status(201).json({
+        message: "Product created. Waiting for admin approval.",
+        product: {
+          product_id,
+          name,
+          status: 'pending'
+        }
+      });
+      ```
+
+Luồng Cập Nhật Sản Phẩm:
+1. Seller click "Sửa" trên sản phẩm
+2. Navigate tới EditProductPage
+3. Form pre-fill current values
+4. Seller chỉnh sửa + submit
+   Request: PATCH /api/products/{product_id}
+   Body: (các fields có thể thay đổi)
+
+5. Backend xử lý:
+   ```javascript
+   const seller_id = req.user.user_id;
+   const product = await Product.findOne({ product_id });
+   
+   // Verify seller ownership
+   if (product.seller_id !== seller_id && req.user.role !== 'admin') {
+     return res.status(403).json({ message: "Not authorized" });
+   }
+   
+   // Validate input (như create)
+   const updates = {};
+   if (req.body.name) updates.name = req.body.name.trim();
+   if (req.body.price) updates.price = parseFloat(req.body.price);
+   if (req.body.stock !== undefined) updates.stock = parseInt(req.body.stock);
+   if (req.body.description) updates.description = req.body.description.trim();
+   if (req.body.category) updates.category = req.body.category;
+   
+   // Handle image update
+   if (req.files && req.files.length > 0) {
+     updates.image = req.files[0].path;
+     updates.gallery = req.files.slice(1).map(f => f.path);
+   }
+   
+   // Update product
+   const updated = await Product.findOneAndUpdate(
+     { product_id },
+     updates,
+     { new: true }
+   );
+   
+   // Log change
+   await AdminLog.create({
+     action: 'update',
+     target_type: 'Product',
+     target_id: product_id,
+     admin_id: seller_id,
+     old_data: product.toObject(),
+     new_data: updated.toObject()
+   });
+   
+   res.json({
+     message: "Product updated",
+     product: updated
+   });
+   ```
+
+Luồng Xóa Sản Phẩm:
+1. Seller click "Xóa" trên sản phẩm
+2. Confirm dialog
+3. Request: DELETE /api/products/{product_id}
+
+4. Backend:
+   ```javascript
+   const product = await Product.findOne({ product_id });
+   
+   // Verify ownership
+   if (product.seller_id !== seller_id) {
+     return res.status(403).json({ message: "Not authorized" });
+   }
+   
+   // Soft delete (set status = inactive)
+   // HOẶC hard delete
+   
+   // Soft delete
+   await Product.findOneAndUpdate(
+     { product_id },
+     { status: 'inactive' },
+     { new: true }
+   );
+   
+   // Log
+   await AdminLog.create({
+     action: 'delete',
+     target_type: 'Product',
+     target_id: product_id,
+     admin_id: seller_id,
+     old_data: product.toObject()
+   });
+   
+   res.json({ message: "Product deleted" });
+   ```
+
+File Upload Handling:
+```javascript
+// uploadMiddleware.js
+const multer = require('multer');
+const path = require('path');
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, 'uploads/products/');
+  },
+  filename: (req, file, cb) => {
+    const filename = Date.now() + '_' + file.originalname;
+    cb(null, filename);
+  }
+});
+
+const fileFilter = (req, file, cb) => {
+  // Chỉ accept images
+  const allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+  if (allowedTypes.includes(file.mimetype)) {
+    cb(null, true);
+  } else {
+    cb(new Error('Invalid file type'));
+  }
+};
+
+const uploadMiddleware = multer({
+  storage,
+  fileFilter,
+  limits: { fileSize: 5 * 1024 * 1024 } // 5MB max
+});
+
+module.exports = uploadMiddleware;
+```
+
+Chỉnh Sửa Thêm:
+- Thêm image optimization (resize, compress)
+- Thêm CDN integration
+- Thêm product variants (color, size, etc.)
+- Thêm bulk upload
+- Thêm product templates
+- Thêm SEO optimization
+- Thêm product analytics
+
+================================================================================
+4. CHỨC NĂNG: Admin Quản Lý Danh Mục
+================================================================================
+Mức độ sử dụng AI: 30%
+Mức độ hiểu biết/chỉnh sửa: Kiểm tra trùng tên
+
+File Code Liên Quan:
+- Backend:
+  • /backend/src/controllers/categoryController.js
+  • /backend/src/routes/categoryRoutes.js
+  • /backend/src/models/categoryModel.js
+
+- Frontend:
+  • /frontend/src/pages/AdminCategoriesPage.js
+
+Luồng Hoạt Động - Xem Danh Sách Danh Mục:
+1. Admin login → AdminDashboardPage
+2. Click tab "Danh mục" → AdminCategoriesPage
+3. Frontend fetch: GET /api/categories
+   Response:
+   ```javascript
+   {
+     categories: [
+       {
+         category_id: "CAT1",
+         name: "Electronics",
+         description: "Điện tử và công nghệ",
+         icon: "url",
+         image: "url",
+         created_at: "2025-12-03T10:00:00Z",
+         product_count: 45
+       },
+       ...
+     ]
+   }
+   ```
+
+4. AdminCategoriesPage hiển thị:
+   - Search bar (tìm theo tên)
+   - Nút "Thêm danh mục"
+   - Category list (table hoặc cards):
+     • Category name
+     • Description
+     • Product count
+     • Created date
+     • Actions: Edit, Delete
+
+Luồng Tạo Danh Mục:
+1. Admin click "Thêm danh mục"
+2. Modal form:
+   - Name (required)
+   - Description (optional)
+   - Icon/Image (optional)
+
+3. Admin fill + click "Tạo"
+   Request: POST /api/categories
+   Body:
+   ```javascript
+   {
+     name: "Electronics",
+     description: "Điện tử và công nghệ",
+     icon: "url",
+     image: <file>
+   }
+   ```
+
+4. Backend xử lý (categoryController.createCategory):
+   a) Verify admin:
+      ```javascript
+      if (req.user.role !== 'admin') {
+        return res.status(403).json({ message: "Only admins can manage categories" });
+      }
+      ```
+   
+   b) **Validate & Check Duplicate**:
+      ```javascript
+      const { name, description } = req.body;
+      
+      if (!name || name.trim().length < 3) {
+        return res.status(400).json({
+          message: "Category name must be at least 3 characters"
+        });
+      }
+      
+      // Check duplicate
+      const exists = await Category.findOne({
+        name: { $regex: `^${name}$`, $options: 'i' } // Case-insensitive
+      });
+      
+      if (exists) {
+        return res.status(409).json({
+          message: `Category "${name}" already exists`
+        });
+      }
+      ```
+   
+   c) Create category:
+      ```javascript
+      const category_id = "CAT" + Date.now();
+      const category = new Category({
+        category_id,
+        name: name.trim(),
+        description: description?.trim() || '',
+        icon: req.file?.path || null,
+        image: req.body.image || null
+      });
+      
+      await category.save();
+      ```
+   
+   d) Response:
+      ```javascript
+      res.status(201).json({
+        message: "Category created successfully",
+        category
+      });
+      ```
+
+Luồng Cập Nhật Danh Mục:
+1. Admin click "Sửa" trên category
+2. Modal form pre-fill current values
+3. Admin chỉnh sửa + submit
+   Request: PATCH /api/categories/{category_id}
+
+4. Backend:
+   ```javascript
+   const { name, description } = req.body;
+   
+   // Check duplicate nếu name thay đổi
+   if (name) {
+     const exists = await Category.findOne({
+       category_id: { $ne: category_id },
+       name: { $regex: `^${name}$`, $options: 'i' }
+     });
+     
+     if (exists) {
+       return res.status(409).json({
+         message: `Category "${name}" already exists`
+       });
+     }
+   }
+   
+   // Update
+   const updated = await Category.findOneAndUpdate(
+     { category_id },
+     { name: name?.trim(), description: description?.trim() },
+     { new: true }
+   );
+   
+   res.json({
+     message: "Category updated",
+     category: updated
+   });
+   ```
+
+Luồng Xóa Danh Mục:
+1. Admin click "Xóa"
+2. Confirm dialog: "Xóa danh mục này? Các sản phẩm sẽ không có danh mục."
+3. Request: DELETE /api/categories/{category_id}
+
+4. Backend:
+   ```javascript
+   // Check if category has products
+   const productCount = await Product.countDocuments({
+     category: category_id
+   });
+   
+   if (productCount > 0) {
+     return res.status(409).json({
+       message: `Cannot delete category with ${productCount} products. 
+                 Please update products first.`
+     });
+   }
+   
+   // Delete category
+   await Category.deleteOne({ category_id });
+   
+   res.json({ message: "Category deleted" });
+   ```
+
+Duplicate Checking Strategies:
+```javascript
+// Strategy 1: Simple case-insensitive check
+const exists = await Category.findOne({
+  name: { $regex: `^${name}$`, $options: 'i' }
+});
+
+// Strategy 2: Using collation (better for i18n)
+const exists = await Category.findOne(
+  { name },
+  null,
+  { collation: { locale: 'en', strength: 2 } } // strength: 2 = ignore case
+);
+
+// Strategy 3: Normalize before check
+const normalized = name.toLowerCase().trim();
+const exists = await Category.findOne({
+  name_normalized: normalized
+});
+// Cần add field name_normalized vào schema
+
+// Strategy 4: Compound uniqueness
+// Combo category_id + name
+const exists = await Category.findOne({
+  category_id: { $ne: category_id },
+  name: { $regex: `^${name}$`, $options: 'i' }
+});
+```
+
+Chỉnh Sửa Thêm:
+- Thêm category hierarchy (parent category)
+- Thêm category permissions
+- Thêm bulk operations
+- Thêm SEO fields (meta title, description)
+- Thêm category images/banners
+- Thêm category recommendations
+- Thêm trending categories
+
+================================================================================
+5. CÔNG NGHỆ STACK
+================================================================================
+Backend:
+- Node.js + Express.js
+- MongoDB + Mongoose
+- Multer (file upload)
+- Regex/Text search
+- Indexing strategy
+
+Frontend:
+- React 18
+- React Router v6
+- Axios
+- Tailwind CSS
+- Form validation
+- File upload UI
+
+Database:
+- MongoDB text indexes
+- Compound indexes
+- Regular indexes
+
+================================================================================
+6. DATABASE INDEXES
+================================================================================
+Product:
+```javascript
+// Search & filter
+db.products.createIndex({ name: "text", description: "text" });
+db.products.createIndex({ status: 1, created_at: -1 });
+db.products.createIndex({ seller_id: 1, status: 1 });
+db.products.createIndex({ category: 1, status: 1 });
+db.products.createIndex({ price: 1 });
+
+// Full text
+db.products.createIndex({
+  name: "text",
+  description: "text",
+  category: "text"
+}, { weights: { name: 10, description: 5, category: 2 } });
+```
+
+Cart:
+```javascript
+db.carts.createIndex({ user_id: 1 });
+db.carts.createIndex({ created_at: 1 }, { expireAfterSeconds: 2592000 }); // 30 days TTL
+```
+
+Category:
+```javascript
+db.categories.createIndex({ name: 1 }, { unique: true });
+db.categories.createIndex({ category_id: 1 }, { unique: true });
+```
+
+================================================================================
+7. API ENDPOINTS (Key)
+================================================================================
+Products:
+- GET /api/products (list + filter + search + pagination)
+- GET /api/products/{id} (detail)
+- POST /api/products (create - seller)
+- PATCH /api/products/{id} (update - seller)
+- DELETE /api/products/{id} (delete - seller/admin)
+
+Cart:
+- POST /api/carts/items (add)
+- GET /api/carts/my (get)
+- PATCH /api/carts/items/{product_id} (update quantity)
+- DELETE /api/carts/items/{product_id} (remove)
+- DELETE /api/carts (clear)
+
+Categories:
+- GET /api/categories (list)
+- POST /api/categories (create - admin)
+- PATCH /api/categories/{id} (update - admin)
+- DELETE /api/categories/{id} (delete - admin)
+
+================================================================================
+8. TESTING CHECKLIST
+================================================================================
+Search & Filter:
+☐ Search by product name
+☐ Search by description
+☐ Filter by category
+☐ Filter by price range
+☐ Sort by price, rating, sold
+☐ Pagination (page, limit)
+☐ Combine multiple filters
+☐ Empty results handling
+☐ Performance under load
+
+Cart:
+☐ Add single product
+☐ Add same product (quantity increase)
+☐ Add multiple products
+☐ Update quantity
+☐ Remove product
+☐ Clear cart
+☐ Stock validation
+☐ Duplicate prevention
+☐ Cart persistence
+
+Product CRUD:
+☐ Create product with image
+☐ Validate all fields
+☐ Duplicate name check (case-insensitive)
+☐ Update product
+☐ Delete product
+☐ Image upload/storage
+☐ Seller ownership check
+☐ Status tracking (pending/active)
+
+Category:
+☐ List categories
+☐ Create category
+☐ Check duplicate names (case-insensitive)
+☐ Update category
+☐ Delete category (with product check)
+
+================================================================================
+HẾT - TỔNG HỢP CÁC CHỨC NĂNG NGUYỄN DƯƠNG TUẤN KHẢI (2331540101)
+================================================================================

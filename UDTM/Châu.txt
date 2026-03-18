@@ -1,0 +1,976 @@
+================================================================================
+TÓM TẮT CÁC CHỨC NĂNG THỰC HIỆN - LÊ HỒ BẢO CHÂU (2331540106)
+================================================================================
+
+================================================================================
+1. CHỨC NĂNG: UI Lịch Sử Đơn Buyer
+================================================================================
+Mức độ sử dụng AI: 30%
+Mức độ hiểu biết/chỉnh sửa: Format giá, responsive
+
+File Code Liên Quan:
+- Frontend:
+  • /frontend/src/pages/OrderListPage.js
+  • /frontend/src/pages/OrderDetailPage.js
+  • /frontend/src/components/OrderCard.js
+
+- Backend:
+  • /backend/src/controllers/orderController.js
+  • /backend/src/routes/orderRoutes.js
+  • /backend/src/models/orderModel.js
+
+Luồng Hoạt Động - Lịch Sử Đơn (Order List):
+1. Buyer click "Xem đơn hàng" từ Header
+   → Navigate tới /orders
+
+2. OrderListPage load:
+   ↓
+3. Frontend fetch: GET /api/orders/my
+   Response:
+   {
+     orders: [
+       {
+         order_id: "O1764756195525",
+         user_id: "U1",
+         items: [
+           {
+             product_id: "P1",
+             product_name: "Sản phẩm 1",
+             price: 100000,
+             quantity: 1,
+             seller_id: "S1"
+           }
+         ],
+         total_amount: 100000,
+         payment_method: "vnpay",
+         payment_status: "paid",
+         order_status: "completed",
+         customer_name: "Trần Nguyễn Anh Khoa",
+         customer_phone: "0912345678",
+         delivery_address: "123 Nguyễn Huệ, TP.HCM",
+         created_at: "2025-12-03T10:00:00Z"
+       },
+       ...
+     ]
+   }
+
+4. OrderListPage hiển thị danh sách OrderCard:
+   Mỗi card hiển thị:
+   
+   ┌─────────────────────────────────────┐
+   │ Đơn #O1764756195525                 │
+   │ 16:36:02 3/12/2025   ✅ Hoàn thành  │
+   ├─────────────────────────────────────┤
+   │ Người nhận: Trần Nguyễn Anh Khoa    │
+   │ Địa chỉ: 123 Nguyễn Huệ, TP.HCM    │
+   │                                     │
+   │ Sản phẩm (1)                        │
+   │ • Sản phẩm 1 (x1)    100.000₫      │
+   │                                     │
+   │ Tổng cộng: 100.000₫                │
+   │                                     │
+   │   [Xem chi tiết]                    │
+   └─────────────────────────────────────┘
+
+5. Buyer click "Xem chi tiết" → Navigate tới /order/{order_id}
+
+Luồng Hoạt Động - Chi Tiết Đơn (Order Detail):
+1. OrderDetailPage load với order_id từ URL params
+   ↓
+2. Frontend fetch: GET /api/orders/{order_id}
+   Response: Order object đầy đủ
+   
+3. OrderDetailPage hiển thị:
+   
+   a) Header:
+      - Đơn hàng #{order_id}
+      - Ngày tạo
+      - Nút "Quay lại"
+   
+   b) Status Timeline (4 bước):
+      1️⃣ Chờ xử lý (pending) - xám nếu completed
+      2️⃣ Đã xác nhận (confirmed) - xanh nếu >= confirmed
+      3️⃣ Đang giao (shipping) - xanh nếu >= shipping
+      4️⃣ Đã giao (completed) - xanh nếu completed
+   
+   c) Thông tin giao hàng (2 cột):
+      • Người nhận: {customer_name}
+      • Điện thoại: {customer_phone}
+      • Địa chỉ: {delivery_address}
+   
+   d) Chi tiết sản phẩm:
+      Bảng:
+      | Sản phẩm | Giá | Số lượng | Thành tiền |
+      |----------|-----|---------|-----------|
+      | Sản phẩm 1 | 100.000 | 1 | 100.000 |
+      | Sản phẩm 2 | 50.000 | 2 | 100.000 |
+   
+   e) Tóm tắt tiền:
+      - Subtotal: 200.000₫
+      - Vận chuyển: Miễn phí
+      - Tổng cộng: 200.000₫
+   
+   f) Thanh toán:
+      - Phương thức: VNPAY / COD
+      - Trạng thái: Đã thanh toán / Chờ thanh toán
+   
+   g) Nút hành động (nếu có):
+      - Liên hệ người bán
+      - Báo cáo vấn đề
+
+Format Giá:
+```javascript
+// Frontend utility
+const formatPrice = (price) => {
+  return price.toLocaleString('vi-VN', {
+    style: 'currency',
+    currency: 'VND',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0
+  });
+};
+// Kết quả: "100.000₫" hoặc "100.000 đ"
+
+// Hoặc simpler
+const formatPrice = (price) => {
+  return `${price.toLocaleString('vi-VN')}₫`;
+};
+```
+
+Responsive Design:
+```
+Mobile (< 640px):
+- Full width cards
+- Stack items vertically
+- Font size: 14px
+
+Tablet (640px - 1024px):
+- 1 column
+- Better spacing
+- Font size: 16px
+
+Desktop (> 1024px):
+- 2 columns (list + detail side by side)
+- Larger cards
+- Font size: 16px
+```
+
+Status Badge Colors:
+```javascript
+const statusConfig = {
+  pending: {
+    label: "Chờ xử lý",
+    color: "bg-yellow-100 text-yellow-800",
+    icon: "⏳"
+  },
+  confirmed: {
+    label: "Đã xác nhận",
+    color: "bg-blue-100 text-blue-800",
+    icon: "✓"
+  },
+  shipping: {
+    label: "Đang giao",
+    color: "bg-purple-100 text-purple-800",
+    icon: "🚚"
+  },
+  completed: {
+    label: "Hoàn thành",
+    color: "bg-green-100 text-green-800",
+    icon: "✔"
+  },
+  canceled: {
+    label: "Hủy",
+    color: "bg-red-100 text-red-800",
+    icon: "✕"
+  }
+};
+```
+
+Auto-Refresh:
+- OrderListPage: 5 giây 1 lần
+- OrderDetailPage: 3 giây 1 lần
+- Focus event: Fetch ngay khi focus vào browser tab
+
+Chỉnh Sửa Thêm:
+- Thêm filter by status (pending, completed, canceled)
+- Thêm sort by date (mới nhất/cũ nhất)
+- Thêm search by order_id
+- Thêm invoice PDF download
+- Thêm track shipment (integrate GHTK, GHN)
+- Thêm return/exchange request
+- Thêm review product
+- Thêm customer support chat
+- Thêm estimated delivery date
+
+================================================================================
+2. CHỨC NĂNG: Seller Xem Danh Sách Sản Phẩm
+================================================================================
+Mức độ sử dụng AI: 30%
+Mức độ hiểu biết/chỉnh sửa: Phân trang + lọc
+
+File Code Liên Quan:
+- Frontend:
+  • /frontend/src/pages/SellerDashboardPage.js (Products tab)
+  • /frontend/src/components/ProductCard.js
+
+- Backend:
+  • /backend/src/controllers/sellerController.js (getSellerProducts)
+  • /backend/src/routes/sellerRoutes.js
+  • /backend/src/models/productModel.js
+
+Luồng Hoạt Động - Seller Xem Sản Phẩm:
+1. Seller login → SellerDashboardPage
+2. Click tab "Sản phẩm" → hiển thị danh sách sản phẩm
+
+3. Frontend fetch: GET /api/seller/products?page=1&limit=10
+   Query params:
+   - page: trang hiện tại (default 1)
+   - limit: số items per page (default 10)
+   - search: tìm theo tên (optional)
+   - status: lọc theo status (optional)
+   - category: lọc theo category (optional)
+   
+   Response:
+   {
+     products: [
+       {
+         product_id: "P1",
+         name: "Sản phẩm 1",
+         price: 100000,
+         category: "Electronics",
+         stock: 10,
+         status: "active",
+         image: "url",
+         created_at: "2025-12-03T10:00:00Z",
+         sold: 150,
+         rating: 4.5
+       },
+       ...
+     ],
+     total: 45,
+     pages: 5,
+     current_page: 1
+   }
+
+4. SellerDashboardPage Products tab hiển thị:
+   
+   a) Top bar:
+      - Search input: "Tìm kiếm sản phẩm..."
+      - Filter dropdown: Status (All/Active/Inactive/Pending)
+      - Nút "Thêm sản phẩm mới"
+      - Nút "Làm mới"
+   
+   b) Product table/cards:
+      Mỗi row/card hiển thị:
+      | Hình | Tên sản phẩm | Giá | Kho | Trạng thái | Đã bán | Rating | Actions |
+      |-----|-------|-----|-----|----------|--------|--------|---------|
+      | img | Sản phẩm 1 | 100K | 10 | 🟢 Active | 150 | ⭐4.5 | Edit/Delete/Toggle |
+      | img | Sản phẩm 2 | 50K | 5 | 🟡 Pending | 75 | ⭐4.0 | Edit/Delete/Toggle |
+   
+   c) Pagination:
+      - Previous button (disabled nếu page = 1)
+      - Page numbers: [1] 2 3 4 5 Next
+      - Next button (disabled nếu page = pages)
+      - "Trang 1 / 5"
+
+5. Filtering:
+   a) Filter by Status:
+      - GET /api/seller/products?status=active
+      - Backend: filter({ status: 'active' })
+   
+   b) Filter by Category:
+      - GET /api/seller/products?category=Electronics
+      - Backend: filter({ category: 'Electronics' })
+   
+   c) Search by Name:
+      - GET /api/seller/products?search=sản phẩm
+      - Backend: filter({ name: { $regex: search, $options: 'i' } })
+
+6. Pagination Backend Logic:
+   ```javascript
+   const page = parseInt(req.query.page) || 1;
+   const limit = parseInt(req.query.limit) || 10;
+   const skip = (page - 1) * limit;
+   
+   const total = await Product.countDocuments(filter);
+   const pages = Math.ceil(total / limit);
+   
+   const products = await Product.find(filter)
+     .sort({ created_at: -1 })
+     .skip(skip)
+     .limit(limit);
+   
+   return res.json({
+     products,
+     total,
+     pages,
+     current_page: page
+   });
+   ```
+
+7. Actions on Product:
+   a) Edit:
+      - Click "Edit" → Navigate to /seller/products/{productId}/edit
+      - EditProductPage
+   
+   b) Delete:
+      - Click "Delete" → Confirm dialog
+      - DELETE /api/seller/products/{productId}
+   
+   c) Toggle Status (Hide/Show):
+      - Click "Ẩn" (yellow button)
+      - PATCH /api/seller/products/{productId}
+      - Body: { status: "inactive" }
+      - Button changes to "Kích hoạt" (blue)
+
+Status Toggle Logic:
+```javascript
+// Frontend
+const toggleStatus = async (productId, currentStatus) => {
+  const newStatus = currentStatus === 'active' ? 'inactive' : 'active';
+  try {
+    await api.patch(`/seller/products/${productId}`, {
+      status: newStatus
+    });
+    // Update local state
+    setProducts(products.map(p =>
+      p.product_id === productId ? { ...p, status: newStatus } : p
+    ));
+  } catch (err) {
+    alert('Error: ' + err.message);
+  }
+};
+```
+
+Chỉnh Sửa Thêm:
+- Thêm bulk actions (select multiple → delete/hide)
+- Thêm sort options (price, rating, sold, date)
+- Thêm quick edit (inline edit)
+- Thêm quick stock update
+- Thêm product analytics (views, clicks)
+- Thêm duplicate product feature
+- Thêm import CSV
+- Thêm export product list
+
+================================================================================
+3. CHỨC NĂNG: Seller Giao Hàng (Shipping → Delivered)
+================================================================================
+Mức độ sử dụng AI: 35%
+Mức độ hiểu biết/chỉnh sửa: Hoàn thiện luồng giao hàng
+
+File Code Liên Quan:
+- Backend:
+  • /backend/src/controllers/sellerController.js (updateOrderStatus)
+  • /backend/src/routes/sellerRoutes.js
+  • /backend/src/models/orderModel.js
+
+- Frontend:
+  • /frontend/src/pages/SellerDashboardPage.js (Orders tab)
+
+Luồng Giao Hàng - Chi Tiết:
+1. Order được create: order_status = "pending"
+   
+2. Seller duyệt đơn (confirm):
+   - Click "Duyệt đơn" → PATCH /api/seller/orders/{orderId}/approve
+   - order_status = "pending" → "confirmed"
+   - payment_status = "pending" → "paid"
+   - Nút "Duyệt đơn" disappear
+   
+3. Seller chuẩn bị hàng (packing):
+   - Order hiển thị "Đã xác nhận" (confirmed)
+   - Seller lấy hàng, kiểm tra chất lượng
+   - Ghi lại thông tin vận chuyển
+   
+4. Seller giao cho đơn vị vận chuyển → Shipping:
+   - Click dropdown status → chọn "Đang giao"
+   - PATCH /api/seller/orders/{orderId}/status
+   - Body: { order_status: "shipping" }
+   - Optional: { tracking_number: "1234567890" } (tích hợp GHTK/GHN)
+   
+   Backend xử lý:
+   ```javascript
+   const updated = await Order.findOneAndUpdate(
+     { order_id: orderId },
+     {
+       order_status: 'shipping',
+       shipping_date: new Date(),
+       tracking_number: req.body.tracking_number || null
+     },
+     { new: true }
+   );
+   
+   // Optional: Call shipping API (GHTK, GHN) để get tracking info
+   // if (tracking_number) {
+   //   const shippingInfo = await callGHKTAPI(tracking_number);
+   // }
+   ```
+   
+   Frontend update:
+   - Order card status label: "Đang giao" 🚚
+   - Timeline step 3 "Đang giao" sáng vàng
+   
+5. Buyer nhận hàng → Delivered:
+   - Buyer xác nhận nhận hàng (optional)
+   - Hoặc sau X ngày tự động chuyển thành "completed"
+   - Seller click status dropdown → chọn "Hoàn thành"
+   - PATCH /api/seller/orders/{orderId}/status
+   - Body: { order_status: "completed" }
+   
+   Backend xử lý:
+   ```javascript
+   const updated = await Order.findOneAndUpdate(
+     { order_id: orderId },
+     {
+       order_status: 'completed',
+       delivered_date: new Date()
+     },
+     { new: true }
+   );
+   
+   // Update payment status (optional)
+   await Payment.findOneAndUpdate(
+     { order_id: orderId },
+     { status: 'success' }
+   );
+   ```
+   
+   Frontend update:
+   - Order card status label: "Hoàn thành" ✔
+   - Payment status: "Đã thanh toán" (xanh)
+   - Timeline step 4 "Đã giao" sáng xanh
+   - Disable status dropdown (completed order)
+
+Status Transition Diagram:
+```
+pending (Chờ xử lý)
+   ↓
+[Seller Click "Duyệt đơn"]
+   ↓
+confirmed (Đã xác nhận)
+   ↓
+[Seller Click Status → "Đang giao"]
+   ↓
+shipping (Đang giao)
+   ↓
+[Seller Click Status → "Hoàn thành"]
+   ↓
+completed (Hoàn thành)
+```
+
+Tracking Integration (Optional):
+```javascript
+// Integrate with GHTK (Giao Hàng Tiết Kiệm)
+const getTrackingInfo = async (tracking_number) => {
+  const response = await axios.get(
+    `https://services.giaohangtietkiem.com/services/shipment/v2/detail`,
+    {
+      params: { id: tracking_number },
+      headers: { 'Token': GHTK_API_TOKEN }
+    }
+  );
+  return response.data;
+};
+
+// Response từ GHTK:
+{
+  "success": true,
+  "message": "Success",
+  "data": {
+    "id": "1234567",
+    "status": "1005", // 1005 = shipped
+    "status_text": "Đang giao",
+    "customer": { ... },
+    "deliver_date": "2025-12-04",
+    "history": [
+      {
+        "time": "2025-12-03 14:00",
+        "status": "1004",
+        "text": "Đã bàn giao cho bên vận chuyển"
+      },
+      { ... }
+    ]
+  }
+}
+```
+
+Seller Orders Tab - UI Detail:
+```
+Danh sách orders với dropdown status:
+
+Order #O123
+Khách: Nguyễn Văn A
+Địa chỉ: 123 Nguyễn Huệ
+Items: [Sản phẩm 1 (x2), Sản phẩm 2 (x1)]
+Tổng tiền: 250.000₫
+
+Trạng thái:
+[Status: Đã xác nhận ✓] ← Dropdown
+├─ Xác nhận
+├─ Đang giao 🚚
+├─ Hoàn thành ✔
+└─ Hủy
+
+Khi click thay đổi:
+1. Show loading spinner
+2. API PATCH /api/seller/orders/{orderId}/status
+3. On success:
+   - Update order card
+   - Show success toast
+   - Timeline update real-time
+4. On error:
+   - Show error message
+   - Rollback dropdown
+```
+
+Chỉnh Sửa Thêm:
+- Thêm tracking number input
+- Thêm shipping cost tracking
+- Thêm delivery confirmation photo
+- Thêm return request handling
+- Thêm auto-complete order sau X ngày
+- Thêm email notification mỗi status change
+- Thêm SMS notification cho buyer
+- Thêm address validation khi shipping
+- Thêm multi-package support
+- Thêm shipping insurance option
+
+================================================================================
+4. CHỨC NĂNG: Admin Xem Toàn Bộ Đơn Hàng
+================================================================================
+Mức độ sử dụng AI: 30%
+Mức độ hiểu biết/chỉnh sửa: Lọc buyer/seller
+
+File Code Liên Quan:
+- Backend:
+  • /backend/src/controllers/orderController.js (getOrdersAdmin)
+  • /backend/src/routes/orderRoutes.js
+  • /backend/src/models/orderModel.js
+
+- Frontend:
+  • /frontend/src/pages/AdminOrdersPage.js
+
+Luồng Hoạt Động - Admin Xem Orders:
+1. Admin login → AdminDashboardPage
+2. Click tab "Đơn hàng" → AdminOrdersPage
+
+3. Frontend fetch: GET /api/admin/orders?page=1&limit=20
+   Query params:
+   - page: trang hiện tại
+   - limit: số items per page
+   - status: lọc order_status (pending/confirmed/shipping/completed)
+   - payment_status: lọc payment_status (pending/paid)
+   - buyer_id: lọc theo buyer (optional)
+   - seller_id: lọc theo seller (optional)
+   - start_date: từ ngày (optional)
+   - end_date: đến ngày (optional)
+   
+   Response:
+   {
+     orders: [
+       {
+         order_id: "O1764756195525",
+         user_id: "U1",
+         buyer_name: "Trần Nguyễn Anh Khoa",
+         items: [
+           { product_id, product_name, seller_id, price, quantity, ... }
+         ],
+         total_amount: 100000,
+         payment_status: "paid",
+         order_status: "completed",
+         created_at: "2025-12-03T10:00:00Z",
+         updated_at: "2025-12-03T16:00:00Z"
+       },
+       ...
+     ],
+     total: 890,
+     pages: 45,
+     current_page: 1
+   }
+
+4. AdminOrdersPage hiển thị:
+   
+   a) Filters & Controls:
+      - Search input: Order ID / Buyer name / Seller name
+      - Status filter dropdown:
+        • All Orders
+        • Pending (Chờ xử lý)
+        • Confirmed (Đã xác nhận)
+        • Shipping (Đang giao)
+        • Completed (Hoàn thành)
+      - Payment Status filter:
+        • All
+        • Paid (Đã thanh toán)
+        • Pending (Chờ thanh toán)
+      - Date range picker:
+        • From date - To date
+      - Nút "Apply Filters"
+      - Nút "Reset"
+      - Nút "Export CSV"
+   
+   b) Orders Table:
+      | Order ID | Buyer | Seller(s) | Amount | Status | Payment | Date | Actions |
+      |----------|-------|-----------|--------|--------|---------|------|---------|
+      | O123 | Nguyễn A | Shop A | 100.000₫ | ✔ Completed | ✔ Paid | 3/12 | View |
+      | O124 | Trần B | Shop B, C | 250.000₫ | 🚚 Shipping | ✔ Paid | 3/12 | View |
+      | O125 | Lê C | Shop D | 50.000₫ | ⏳ Pending | ⏳ Pending | 3/12 | View |
+   
+   c) Pagination:
+      - Previous/Next buttons
+      - Page info: "Trang 1 / 45"
+      - Jump to page input
+
+5. Search & Filter Logic:
+   
+   a) Filter by Status:
+      ```javascript
+      // Backend
+      if (status) {
+        filter.order_status = status;
+      }
+      
+      const orders = await Order.find(filter);
+      ```
+   
+   b) Filter by Payment Status:
+      ```javascript
+      if (payment_status) {
+        filter.payment_status = payment_status;
+      }
+      ```
+   
+   c) Filter by Buyer:
+      ```javascript
+      if (buyer_id) {
+        filter.user_id = buyer_id;
+      }
+      ```
+   
+   d) Filter by Seller:
+      ```javascript
+      if (seller_id) {
+        filter['items.seller_id'] = seller_id;
+      }
+      ```
+   
+   e) Date Range Filter:
+      ```javascript
+      if (start_date || end_date) {
+        filter.created_at = {};
+        if (start_date) {
+          filter.created_at.$gte = new Date(start_date);
+        }
+        if (end_date) {
+          filter.created_at.$lte = new Date(end_date);
+        }
+      }
+      ```
+   
+   f) Search (Order ID / Name):
+      ```javascript
+      if (search) {
+        filter.$or = [
+          { order_id: { $regex: search, $options: 'i' } },
+          { customer_name: { $regex: search, $options: 'i' } },
+          { 'items.seller_id': { $regex: search, $options: 'i' } }
+        ];
+      }
+      ```
+
+6. Admin Click View Order:
+   - Modal/Detail page
+   - Hiển thị:
+     • Order header (ID, date, status)
+     • Customer info (name, phone, address)
+     • Items list (all items, not filtered by seller)
+     • Seller info (tách theo seller)
+     • Payment info
+     • Timeline (history)
+   - Actions:
+     • Liên hệ customer
+     • Liên hệ seller
+     • Export invoice
+     • Cancel order (nếu chưa shipped)
+
+Admin Orders API:
+```javascript
+// Backend orderController.getOrdersAdmin
+export const getOrdersAdmin = async (req, res) => {
+  try {
+    // Verify admin
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ message: 'Unauthorized' });
+    }
+
+    // Build filter
+    const filter = {};
+    
+    if (req.query.status) {
+      filter.order_status = req.query.status;
+    }
+    
+    if (req.query.payment_status) {
+      filter.payment_status = req.query.payment_status;
+    }
+    
+    if (req.query.buyer_id) {
+      filter.user_id = req.query.buyer_id;
+    }
+    
+    if (req.query.seller_id) {
+      filter['items.seller_id'] = req.query.seller_id;
+    }
+    
+    if (req.query.search) {
+      filter.$or = [
+        { order_id: { $regex: req.query.search, $options: 'i' } },
+        { customer_name: { $regex: req.query.search, $options: 'i' } }
+      ];
+    }
+    
+    if (req.query.start_date || req.query.end_date) {
+      filter.created_at = {};
+      if (req.query.start_date) {
+        filter.created_at.$gte = new Date(req.query.start_date);
+      }
+      if (req.query.end_date) {
+        filter.created_at.$lte = new Date(req.query.end_date);
+      }
+    }
+
+    // Pagination
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+    const skip = (page - 1) * limit;
+
+    const total = await Order.countDocuments(filter);
+    const pages = Math.ceil(total / limit);
+
+    const orders = await Order.find(filter)
+      .sort({ created_at: -1 })
+      .skip(skip)
+      .limit(limit);
+
+    return res.json({
+      orders,
+      total,
+      pages,
+      current_page: page
+    });
+  } catch (err) {
+    console.error('❌ getOrdersAdmin error:', err);
+    return res.status(500).json({ message: 'Server error' });
+  }
+};
+```
+
+Export CSV Feature:
+```javascript
+// Frontend
+const exportToCSV = async (orders) => {
+  const csv = [
+    ['Order ID', 'Buyer', 'Amount', 'Status', 'Payment', 'Date'],
+    ...orders.map(o => [
+      o.order_id,
+      o.customer_name,
+      o.total_amount,
+      o.order_status,
+      o.payment_status,
+      new Date(o.created_at).toLocaleDateString('vi-VN')
+    ])
+  ];
+
+  const csvContent = csv
+    .map(row => row.map(cell => `"${cell}"`).join(','))
+    .join('\n');
+
+  const blob = new Blob([csvContent], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `orders_${new Date().toISOString()}.csv`;
+  a.click();
+};
+```
+
+Chỉnh Sửa Thêm:
+- Thêm advanced filter (custom date range, amount range)
+- Thêm export PDF
+- Thêm bulk actions (cancel multiple orders)
+- Thêm order status change log
+- Thêm dispute/complaint tracking
+- Thêm revenue analytics by seller
+- Thêm conversion rate tracking
+- Thêm average order value by period
+- Thêm refund management
+- Thêm order fulfillment rate by seller
+
+================================================================================
+5. DATABASE QUERIES - OPTIMIZATION
+================================================================================
+Orders:
+- Index on: user_id, order_status, payment_status, created_at
+- Index on: items.seller_id (for seller filtering)
+- Index on: customer_name (for search)
+
+Products:
+- Index on: seller_id, status, created_at
+
+Aggregation for Admin:
+```javascript
+// Total orders by status
+Order.aggregate([
+  { $group: {
+    _id: '$order_status',
+    count: { $sum: 1 },
+    revenue: { $sum: '$total_amount' }
+  }},
+  { $sort: { _id: 1 } }
+])
+
+// Total orders by date
+Order.aggregate([
+  { $group: {
+    _id: { $dateToString: { format: '%Y-%m-%d', date: '$created_at' } },
+    count: { $sum: 1 },
+    revenue: { $sum: '$total_amount' }
+  }},
+  { $sort: { _id: 1 } }
+])
+
+// Orders with seller details
+Order.aggregate([
+  { $unwind: '$items' },
+  { $group: {
+    _id: '$items.seller_id',
+    total_orders: { $sum: 1 },
+    total_revenue: { $sum: '$items.subtotal' }
+  }},
+  { $sort: { total_revenue: -1 } }
+])
+```
+
+================================================================================
+6. API ENDPOINTS (Key)
+================================================================================
+Orders (Buyer):
+- GET /api/orders/my (get buyer orders)
+- GET /api/orders/{id} (get order detail)
+
+Orders (Seller):
+- GET /api/seller/orders (get seller orders)
+- PATCH /api/seller/orders/{orderId}/approve (approve order)
+- PATCH /api/seller/orders/{orderId}/status (update status)
+
+Orders (Admin):
+- GET /api/admin/orders (get all orders with filters)
+- GET /api/admin/orders/{id} (get order detail)
+- PATCH /api/admin/orders/{id}/cancel (admin cancel order)
+
+================================================================================
+7. STATUS BADGE COLORS & ICONS
+================================================================================
+Order Status:
+- pending: ⏳ Chờ xử lý - bg-yellow-100 text-yellow-800
+- confirmed: ✓ Đã xác nhận - bg-blue-100 text-blue-800
+- shipping: 🚚 Đang giao - bg-purple-100 text-purple-800
+- completed: ✔ Hoàn thành - bg-green-100 text-green-800
+- canceled: ✕ Hủy - bg-red-100 text-red-800
+
+Payment Status:
+- pending: ⏳ Chờ thanh toán - bg-yellow-100 text-yellow-800
+- paid: ✔ Đã thanh toán - bg-green-100 text-green-800
+- failed: ✕ Thất bại - bg-red-100 text-red-800
+
+================================================================================
+8. ERROR HANDLING
+================================================================================
+Order List:
+- API error → Show error message + Retry button
+- Empty list → Show "Không có đơn hàng"
+- Timeout → Show skeleton loading + Retry
+
+Order Detail:
+- Not found → Show 404 message
+- Permission denied → Show 403 message
+- Network error → Show error + Retry
+
+Seller Operations:
+- Status change failed → Show error toast
+- Unauthorized → Show 403 message
+- Order not found → Show 404 message
+
+Admin Filters:
+- Invalid date range → Show error message
+- Too many results → Suggest narrower filter
+- No results → Show "Không tìm thấy"
+
+================================================================================
+9. TESTING CHECKLIST
+================================================================================
+Order List (Buyer):
+☐ Load order list
+☐ Display order cards with correct info
+☐ Price formatting (VND)
+☐ Status badges colored correctly
+☐ Click "View details" navigation
+☐ Auto-refresh every 5 seconds
+☐ Responsive design (mobile/tablet/desktop)
+☐ Empty list handling
+☐ Error handling
+
+Order Detail (Buyer):
+☐ Load order details
+☐ Display all information
+☐ Timeline rendering
+☐ Timeline highlights current status
+☐ Auto-refresh every 3 seconds
+☐ Responsive layout
+☐ Error handling
+
+Seller Products:
+☐ Load products list
+☐ Pagination working
+☐ Filter by status
+☐ Search functionality
+☐ Edit product action
+☐ Delete product with confirmation
+☐ Toggle status (hide/show)
+☐ Add new product navigation
+
+Seller Orders (Shipping):
+☐ Load orders list
+☐ Approve order
+☐ Update status to shipping
+☐ Update status to completed
+☐ Status dropdown visible correctly
+☐ Real-time update
+☐ Error handling
+
+Admin Orders:
+☐ Load all orders
+☐ Filter by status
+☐ Filter by payment status
+☐ Filter by date range
+☐ Search functionality
+☐ Filter by buyer/seller
+☐ Pagination
+☐ View order detail
+☐ Export CSV
+☐ Responsive design
+
+================================================================================
+10. PERFORMANCE OPTIMIZATION
+================================================================================
+- Pagination (20 items per page)
+- Lazy load product images
+- Debounce search (500ms)
+- Cache order list (5 minute)
+- Memoize components
+- Virtual scrolling for large lists
+- Image optimization (WebP)
+- Compress API responses
+- Index database queries
+
+================================================================================
+HẾT - TỔNG HỢP CÁC CHỨC NĂNG LÊ HỒ BẢO CHÂU (2331540106)
+================================================================================

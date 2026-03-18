@@ -1,0 +1,869 @@
+================================================================================
+TÓM TẮT CÁC CHỨC NĂNG THỰC HIỆN - LÊ QUANG HUY (2331540305)
+================================================================================
+
+================================================================================
+1. CHỨC NĂNG: UI Giỏ Hàng Buyer
+================================================================================
+Mức độ sử dụng AI: 30%
+Mức độ hiểu biết/chỉnh sửa: Đồng bộ dữ liệu backend
+
+File Code Liên Quan:
+- Frontend:
+  • /frontend/src/pages/CartPage.js
+  • /frontend/src/components/CartItem.js
+  • /frontend/src/App.js (cart state management)
+
+- Backend:
+  • /backend/src/controllers/cartController.js
+  • /backend/src/routes/cartRoutes.js
+  • /backend/src/models/cartModel.js
+  • /backend/src/controllers/cartItemController.js
+  • /backend/src/routes/cartItemRoutes.js
+
+Luồng Hoạt Động - Giỏ Hàng:
+1. Buyer duyệt trang chủ, click "Thêm vào giỏ" trên sản phẩm
+   ↓
+2. Frontend gửi POST /api/carts/items
+   Request Body:
+   {
+     product_id: "P123",
+     quantity: 2,
+     price: 100000,
+     name: "Sản phẩm 1",
+     image: "url",
+     seller_id: "S1"
+   }
+
+3. Backend xử lý (cartItemController.addToCart):
+   a) Verify user từ authMiddleware
+   
+   b) Tìm hoặc tạo Cart cho user:
+      - Check: Cart exists with user_id
+      - Nếu không → Create new Cart
+   
+   c) Check nếu item đã tồn tại trong giỏ:
+      - Filter: cart.items.find(i => i.product_id === product_id)
+      - Nếu tồn tại → cập nhật quantity: += req.body.quantity
+      - Nếu không → push item mới vào array
+   
+   d) Update cart document:
+      ```javascript
+      const cart = await Cart.findByIdAndUpdate(
+        cart_id,
+        {
+          items: updatedItems,
+          total_items: updatedItems.length,
+          total_amount: calculateTotal(updatedItems)
+        },
+        { new: true }
+      );
+      ```
+   
+   e) Response:
+      {
+        message: "Item added to cart",
+        cart: {
+          cart_id,
+          user_id,
+          items: [...],
+          total_items: 5,
+          total_amount: 500000
+        }
+      }
+
+4. Frontend cập nhật state:
+   - setCartCount(cartResponse.total_items)
+   - Hiển thị notification "Đã thêm vào giỏ"
+
+5. Buyer mở giỏ hàng (CartPage)
+   ↓
+6. Frontend fetch GET /api/carts/my
+   Response:
+   {
+     cart: {
+       cart_id: "C123",
+       user_id: "U1",
+       items: [
+         {
+           product_id: "P1",
+           name: "Sản phẩm 1",
+           price: 100000,
+           quantity: 2,
+           subtotal: 200000,
+           image: "url",
+           seller_id: "S1"
+         },
+         {
+           product_id: "P2",
+           name: "Sản phẩm 2",
+           price: 50000,
+           quantity: 1,
+           subtotal: 50000,
+           image: "url",
+           seller_id: "S2"
+         }
+       ],
+       total_items: 3,
+       total_amount: 250000
+     }
+   }
+
+7. CartPage hiển thị:
+   - Header: "Giỏ hàng (3 sản phẩm)"
+   - CartItem list với mỗi item:
+     • Thumbnail image
+     • Tên sản phẩm
+     • Giá
+     • Số lượng (input, có nút +/-)
+     • Subtotal (price × quantity)
+     • Nút xóa
+   - Summary:
+     • Tổng sản phẩm
+     • Tổng tiền
+     • Nút "Thanh toán"
+     • Nút "Tiếp tục mua sắm"
+
+8. Buyer thay đổi số lượng → PATCH /api/carts/items/{product_id}
+   Request Body: { quantity: 3 }
+   Backend:
+   - Find item in cart
+   - Update quantity
+   - Recalculate total
+   - Response updated cart
+
+9. Buyer xóa item → DELETE /api/carts/items/{product_id}
+   Backend:
+   - Remove item from cart.items array
+   - Recalculate total
+   - Response updated cart
+
+10. Buyer click "Thanh toán" → Navigate to CheckoutPage
+    - CheckoutPage nhận cart data từ App state
+    - Hiển thị thông tin giao hàng form
+    - Click "Thanh toán" → tạo order
+
+Quản Lý State Giỏ Hàng:
+```javascript
+// App.js - Cart state management
+const [cart, setCart] = useState([]);
+
+// Từ localStorage
+useEffect(() => {
+  const saved = localStorage.getItem("cart");
+  if (saved) setCart(JSON.parse(saved));
+}, []);
+
+// Lưu vào localStorage mỗi khi thay đổi
+useEffect(() => {
+  localStorage.setItem("cart", JSON.stringify(cart));
+}, [cart]);
+
+// Thêm vào giỏ
+const addToCart = (product) => {
+  const existing = cart.find(c => c.product_id === product.product_id);
+  if (existing) {
+    setCart(cart.map(c =>
+      c.product_id === product.product_id
+        ? { ...c, quantity: c.quantity + product.quantity }
+        : c
+    ));
+  } else {
+    setCart([...cart, product]);
+  }
+};
+
+// Cập nhật số lượng
+const updateCart = (product_id, quantity) => {
+  setCart(cart.map(c =>
+    c.product_id === product_id ? { ...c, quantity } : c
+  ));
+};
+
+// Xóa khỏi giỏ
+const removeFromCart = (product_id) => {
+  setCart(cart.filter(c => c.product_id !== product_id));
+};
+```
+
+Tính Toán Tổng Tiền:
+```javascript
+// Frontend (CartPage)
+const total = cart.reduce((sum, item) =>
+  sum + (item.price || 0) * (item.quantity || 1), 0
+);
+
+const subtotal = (item) => (item.price || 0) * (item.quantity || 1);
+
+// Backend (cartController)
+const calculateTotal = (items) => {
+  return items.reduce((sum, item) => sum + item.subtotal, 0);
+};
+```
+
+Đồng Bộ Backend:
+1. Khi user login → fetch /api/carts/my
+2. So sánh localStorage cart vs server cart
+3. Nếu server cart khác:
+   - Merge: items mới từ server + items cũ
+   - Hoặc replace: dùng server cart (thường chọn cách này)
+4. Cập nhật localStorage
+
+Chỉnh Sửa Thêm:
+- Thêm persistence cart vào database
+- Thêm coupon/discount code
+- Thêm stock validation
+- Thêm saved items wishlist
+- Thêm quick checkout (one-click)
+- Thêm cart sharing (URL share)
+- Thêm abandoned cart recovery email
+
+================================================================================
+2. CHỨC NĂNG: UI HomePage + Danh Sách Sản Phẩm
+================================================================================
+Mức độ sử dụng AI: 30%
+Mức độ hiểu biết/chỉnh sửa: Thiết kế UI + xử lý lỗi
+
+File Code Liên Quan:
+- Frontend:
+  • /frontend/src/pages/HomePage.js
+  • /frontend/src/components/ProductItem.js
+  • /frontend/src/components/CategoryList.js
+  • /frontend/src/components/Header.js
+
+- Backend:
+  • /backend/src/controllers/productController.js
+  • /backend/src/routes/productRoutes.js
+  • /backend/src/models/productModel.js
+
+Luồng Hoạt Động - HomePage:
+1. Buyer truy cập "/" hoặc "/home"
+   ↓
+2. HomePage load:
+   a) Fetch categories: GET /api/categories
+   b) Fetch products: GET /api/products?limit=20&page=1
+   c) Fetch featured products: GET /api/products?featured=true
+
+3. API Response cho Products:
+   {
+     products: [
+       {
+         product_id: "P1",
+         name: "Sản phẩm 1",
+         price: 100000,
+         category: "Electronics",
+         seller_id: "S1",
+         seller_name: "Shop A",
+         description: "Mô tả sản phẩm",
+         image: "url",
+         trailer: "video_url",
+         stock: 10,
+         rating: 4.5,
+         sold: 150,
+         status: "active"
+       },
+       ...
+     ],
+     total: 150,
+     pages: 8,
+     current_page: 1
+   }
+
+4. HomePage hiển thị:
+   - Banner/Hero section
+     • Featured image
+     • Promotional text
+     • CTA button
+   
+   - Category Filter:
+     • Danh sách categories (horizontal scroll)
+     • Click category → filter products
+   
+   - Product Grid:
+     • Grid layout (responsive: 1-4 columns)
+     • Mỗi ProductItem card:
+       - Thumbnail image
+       - Product name (truncated)
+       - Price (formatted VND)
+       - Star rating + review count
+       - "Sold X items"
+       - Stock indicator
+       - Nút "Thêm vào giỏ" / "Xem chi tiết"
+   
+   - Pagination:
+     • Previous/Next buttons
+     • Page numbers
+     • Jump to page input
+
+Luồng Tìm Kiếm:
+1. Buyer nhập search query trong Header search bar
+2. Press Enter hoặc click search button
+3. Navigate tới /home?q={query}
+4. HomePage check URL params:
+   ```javascript
+   const searchParams = new URLSearchParams(location.search);
+   const query = searchParams.get('q');
+   ```
+
+5. Fetch: GET /api/products?search={query}
+   Backend filter:
+   ```javascript
+   const products = await Product.find({
+     $or: [
+       { name: { $regex: query, $options: 'i' } },
+       { description: { $regex: query, $options: 'i' } },
+       { category: { $regex: query, $options: 'i' } }
+     ]
+   });
+   ```
+
+6. HomePage cập nhật product list với kết quả tìm kiếm
+
+Luồng Filter by Category:
+1. CategoryList render tất cả categories
+2. Buyer click category
+3. Fetch: GET /api/products?category={categoryId}
+4. Backend filter:
+   ```javascript
+   const products = await Product.find({ category: categoryId });
+   ```
+5. HomePage cập nhật product list
+
+Xử Lý Lỗi:
+1. Network error:
+   - Hiển thị error message
+   - Nút "Retry"
+2. Empty results:
+   - Hiển thị "Không tìm thấy sản phẩm"
+   - Suggest categories
+3. API timeout:
+   - Timeout sau 10s
+   - Show skeleton loading
+4. Image load error:
+   - Hiển thị placeholder image
+   - Retry image load
+
+Responsive Design:
+```
+Mobile (< 640px):
+- 1 column grid
+- Full width product cards
+
+Tablet (640px - 1024px):
+- 2 columns
+
+Desktop (> 1024px):
+- 3-4 columns
+
+Large screen (> 1400px):
+- 4-5 columns
+```
+
+ProductItem Component:
+```jsx
+<div className="product-card hover:shadow-lg">
+  <div className="relative">
+    <img src={product.image} alt={product.name} />
+    {product.stock <= 5 && (
+      <span className="badge-danger">Sắp hết hàng</span>
+    )}
+    {product.status !== 'active' && (
+      <span className="badge-secondary">Ngừng bán</span>
+    )}
+  </div>
+  <div className="product-info p-4">
+    <h3 className="font-semibold truncate">{product.name}</h3>
+    <div className="flex justify-between items-center mt-2">
+      <span className="text-lg font-bold text-green-600">
+        {product.price.toLocaleString('vi-VN')}₫
+      </span>
+      <span className="text-sm text-gray-500">
+        ⭐ {product.rating}
+      </span>
+    </div>
+    <p className="text-xs text-gray-500 mt-1">
+      Đã bán {product.sold}
+    </p>
+    <button onClick={() => addToCart(product)}>
+      Thêm vào giỏ
+    </button>
+  </div>
+</div>
+```
+
+Chỉnh Sửa Thêm:
+- Thêm sort options (giá, đánh giá, mới nhất)
+- Thêm price range filter
+- Thêm advanced filters (brand, color, size)
+- Thêm infinite scroll thay vì pagination
+- Thêm recently viewed products
+- Thêm wishlist/favorite feature
+- Thêm quick view modal
+- Thêm seller rating filter
+- Optimize image lazy loading
+- Thêm product recommendations
+
+================================================================================
+3. CHỨC NĂNG: Admin Duyệt Sản Phẩm
+================================================================================
+Mức độ sử dụng AI: 40%
+Mức độ hiểu biết/chỉnh sửa: Check trạng thái
+
+File Code Liên Quan:
+- Backend:
+  • /backend/src/controllers/productController.js (approveProduct, rejectProduct)
+  • /backend/src/routes/productRoutes.js
+  • /backend/src/models/productModel.js
+  • /backend/src/models/adminLogModel.js
+
+- Frontend:
+  • /frontend/src/pages/AdminProductsPage.js
+  • /frontend/src/pages/AdminDashboardPage.js
+
+Luồng Hoạt Động - Admin Duyệt Sản Phẩm:
+1. Admin login → AdminDashboardPage
+2. Click tab "Sản phẩm" → AdminProductsPage
+   
+3. Frontend fetch: GET /api/admin/products?status=pending
+   Response:
+   {
+     products: [
+       {
+         product_id: "P1",
+         name: "Sản phẩm 1",
+         seller_id: "S1",
+         seller_name: "Shop A",
+         price: 100000,
+         category: "Electronics",
+         status: "pending", // pending | active | rejected
+         image: "url",
+         description: "Mô tả chi tiết",
+         rejection_reason: null,
+         created_at: "2025-12-03T10:00:00Z",
+         updated_at: "2025-12-03T10:00:00Z"
+       },
+       ...
+     ]
+   }
+
+4. AdminProductsPage hiển thị:
+   - Filter buttons:
+     • All Products
+     • Pending (Chờ duyệt)
+     • Active (Đã duyệt)
+     • Rejected (Bị từ chối)
+   
+   - Search bar (tìm theo tên sản phẩm, seller)
+   
+   - Product List (table hoặc cards):
+     • Product ID
+     • Seller Name
+     • Product Name
+     • Price
+     • Status badge:
+       - pending: vàng 🟡
+       - active: xanh lá 🟢
+       - rejected: đỏ 🔴
+     • Date created
+     • Actions:
+       - View details (button)
+       - Approve (button - chỉ nếu pending)
+       - Reject (button - chỉ nếu pending)
+       - Delete (button)
+
+5. Admin click "View Details" → Modal/Detail Page:
+   - Hiển thị đầy đủ:
+     • Product image + gallery
+     • Product name
+     • Category
+     • Price
+     • Seller info
+     • Description (full)
+     • Specifications/Features
+     • Stock
+     • Status history
+     • Rejection reason (nếu rejected)
+   - Actions:
+     • Approve
+     • Reject (with reason)
+     • Edit
+     • Delete
+
+6. Admin click "Approve" → PATCH /api/admin/products/{productId}/approve
+   Request:
+   {}
+   
+   Backend xử lý (productController.approveProduct):
+   a) Verify admin role
+   
+   b) Find product:
+      ```javascript
+      const product = await Product.findOne({ product_id: productId });
+      ```
+   
+   c) Check status = "pending":
+      ```javascript
+      if (product.status !== 'pending') {
+        return res.status(400).json({
+          message: 'Product already approved or rejected'
+        });
+      }
+      ```
+   
+   d) Update product:
+      ```javascript
+      const updated = await Product.findOneAndUpdate(
+        { product_id: productId },
+        {
+          status: 'active',
+          approved_at: new Date(),
+          approved_by: admin_id
+        },
+        { new: true }
+      );
+      ```
+   
+   e) Create AdminLog:
+      ```javascript
+      await AdminLog.create({
+        action: 'approve',
+        target_type: 'Product',
+        target_id: productId,
+        admin_id: req.user.user_id,
+        old_data: { status: 'pending' },
+        new_data: { status: 'active' }
+      });
+      ```
+   
+   f) Response:
+      {
+        message: "Product approved successfully",
+        product: { updated product }
+      }
+
+7. Frontend cập nhật UI:
+   - Remove product từ pending list
+   - Show success notification
+   - Update product list
+
+8. Admin click "Reject" → PATCH /api/admin/products/{productId}/reject
+   Request:
+   {
+     rejection_reason: "Hình ảnh không rõ ràng. Vui lòng cập nhật lại."
+   }
+   
+   Backend xử lý (productController.rejectProduct):
+   a) Verify admin + validate rejection_reason
+   
+   b) Update product:
+      ```javascript
+      const updated = await Product.findOneAndUpdate(
+        { product_id: productId },
+        {
+          status: 'rejected',
+          rejection_reason: rejection_reason,
+          rejected_at: new Date(),
+          rejected_by: admin_id
+        },
+        { new: true }
+      );
+      ```
+   
+   c) Create AdminLog
+   
+   d) Optional: Send email tới seller:
+      ```javascript
+      // Notify seller
+      sendEmail({
+        to: seller.email,
+        subject: 'Sản phẩm bị từ chối',
+        body: `Sản phẩm "${product.name}" bị từ chối vì: ${rejection_reason}`
+      });
+      ```
+
+9. Seller nhận email → Log vào account → Chỉnh sửa sản phẩm
+   - PATCH /api/products/{productId}
+   - Cập nhật hình ảnh, mô tả, etc.
+   - Status tự động reset về "pending"
+   - Vòng lặp duyệt lại
+
+Trạng Thái Sản Phẩm:
+1. pending (Chờ duyệt):
+   - Seller vừa tạo sản phẩm
+   - Sản phẩm không hiển thị trên HomePage
+   - Không thể bán được
+   
+2. active (Đã duyệt):
+   - Admin approve
+   - Sản phẩm hiển thị trên HomePage
+   - Buyer có thể mua
+   
+3. rejected (Bị từ chối):
+   - Admin reject với lý do
+   - Sản phẩm không hiển thị
+   - Seller phải chỉnh sửa
+   - Sau chỉnh sửa → status quay lại pending
+
+4. inactive (Ngừng bán):
+   - Seller tự ẩn sản phẩm
+   - Sản phẩm không hiển thị
+   - Đã duyệt nhưng tạm ẩn
+
+Filtering Products:
+```javascript
+// Backend productController.getProducts
+let filter = {};
+
+if (status) {
+  filter.status = status; // pending, active, rejected
+}
+
+if (search) {
+  filter.$or = [
+    { name: { $regex: search, $options: 'i' } },
+    { seller_id: { $regex: search, $options: 'i' } }
+  ];
+}
+
+if (seller_id) {
+  filter.seller_id = seller_id;
+}
+
+if (category) {
+  filter.category = category;
+}
+
+const products = await Product.find(filter)
+  .sort({ created_at: -1 })
+  .skip((page - 1) * limit)
+  .limit(limit);
+```
+
+Admin Logs - Tracking:
+```
+Event: Product Approved
+{
+  log_id: "LOG123",
+  action: "approve_product",
+  target_type: "Product",
+  target_id: "P1",
+  admin_id: "A1",
+  admin_name: "Admin User",
+  old_data: { status: "pending" },
+  new_data: { status: "active", approved_at: "..." },
+  timestamp: "2025-12-03T10:05:00Z"
+}
+
+Event: Product Rejected
+{
+  log_id: "LOG124",
+  action: "reject_product",
+  target_type: "Product",
+  target_id: "P1",
+  admin_id: "A1",
+  old_data: { status: "pending" },
+  new_data: {
+    status: "rejected",
+    rejection_reason: "Hình ảnh không rõ ràng"
+  },
+  timestamp: "2025-12-03T10:10:00Z"
+}
+```
+
+Chỉnh Sửa Thêm:
+- Thêm batch approve/reject
+- Thêm auto-approve nếu không vi phạm
+- Thêm product quality scoring
+- Thêm image verification (OCR, NSFW detection)
+- Thêm plagiarism check
+- Thêm seller rating impact
+- Thêm appeal system
+- Thêm schedule approval
+- Thêm SLA tracking (duyệt trong 24h)
+- Thêm admin notes/comments
+- Integrate AI content moderation
+
+================================================================================
+4. DATABASE MODELS - CHI TIẾT
+================================================================================
+Cart Model:
+{
+  _id: ObjectId,
+  cart_id: "C123",
+  user_id: "U1",
+  items: [
+    {
+      product_id: "P1",
+      name: "Sản phẩm 1",
+      price: 100000,
+      quantity: 2,
+      subtotal: 200000,
+      image: "url",
+      seller_id: "S1"
+    }
+  ],
+  total_items: 3,
+  total_amount: 250000,
+  created_at: "2025-12-03T10:00:00Z",
+  updated_at: "2025-12-03T10:10:00Z"
+}
+
+Product Model (extended):
+{
+  _id: ObjectId,
+  product_id: "P1",
+  name: "Sản phẩm 1",
+  price: 100000,
+  category: "Electronics",
+  seller_id: "S1",
+  seller_name: "Shop A",
+  description: "Mô tả chi tiết",
+  image: "url",
+  trailer: "video_url",
+  gallery: ["url1", "url2", ...],
+  stock: 10,
+  rating: 4.5,
+  sold: 150,
+  
+  // Status & Moderation
+  status: "pending|active|rejected|inactive",
+  rejection_reason: "Hình ảnh không rõ ràng" | null,
+  approved_by: "A1" | null,
+  approved_at: "2025-12-03T10:05:00Z" | null,
+  rejected_by: "A1" | null,
+  rejected_at: "2025-12-03T10:10:00Z" | null,
+  
+  created_at: "2025-12-03T10:00:00Z",
+  updated_at: "2025-12-03T10:15:00Z"
+}
+
+================================================================================
+5. API ENDPOINTS (Key)
+================================================================================
+Cart:
+- POST /api/carts/items (add to cart)
+- GET /api/carts/my (get my cart)
+- PATCH /api/carts/items/{product_id} (update quantity)
+- DELETE /api/carts/items/{product_id} (remove item)
+- DELETE /api/carts (clear cart)
+
+Products:
+- GET /api/products (list with filters)
+- GET /api/products?category={id} (filter by category)
+- GET /api/products?search={query} (search)
+- GET /api/products/{id} (detail)
+- POST /api/products (create - seller)
+- PATCH /api/products/{id} (update - seller)
+- DELETE /api/products/{id} (delete - seller/admin)
+
+Admin Products:
+- GET /api/admin/products?status=pending (list pending)
+- GET /api/admin/products/{id} (detail)
+- PATCH /api/admin/products/{id}/approve (approve)
+- PATCH /api/admin/products/{id}/reject (reject)
+
+Categories:
+- GET /api/categories (list all)
+
+================================================================================
+6. ERROR HANDLING
+================================================================================
+Cart:
+- Product not found → 404
+- Invalid quantity → 400
+- Out of stock → 409 Conflict
+- User not authenticated → 401
+
+Products:
+- Product not found → 404
+- Seller mismatch → 403
+- Invalid status → 400
+- Duplicate product → 409
+
+Admin Moderation:
+- Not admin → 403
+- Product not pending → 400
+- Invalid rejection reason → 400
+
+================================================================================
+7. PERFORMANCE OPTIMIZATION
+================================================================================
+Cart:
+- Cache cart in Redux/Context
+- Debounce quantity changes
+- Lazy load cart items
+
+Products:
+- Implement pagination (limit 20 per page)
+- Cache product list
+- Lazy load product images
+- Image optimization (WebP format)
+- CDN for images
+- Index on: category, status, seller_id, created_at
+
+HomePage:
+- Code splitting (lazy load ProductItem)
+- Memoize components
+- Virtual scrolling for large lists
+
+Admin Products:
+- Infinite scroll hoặc pagination
+- Real-time notifications for pending products
+- Filter caching
+
+================================================================================
+8. TESTING CHECKLIST
+================================================================================
+Cart:
+☐ Add product to empty cart
+☐ Add same product (quantity increase)
+☐ Add multiple different products
+☐ Update product quantity
+☐ Remove product from cart
+☐ Clear cart
+☐ Cart persistence (localStorage)
+☐ Cart sync on login
+
+HomePage:
+☐ Load products list
+☐ Filter by category
+☐ Search functionality
+☐ Pagination
+☐ Error handling (API fail)
+☐ Responsive design (mobile/tablet/desktop)
+☐ Add to cart from list
+☐ Navigate to detail
+
+Admin Products:
+☐ List pending products
+☐ Approve product
+☐ Reject with reason
+☐ View product details
+☐ Search/filter
+☐ Pagination
+☐ Log tracking
+
+================================================================================
+9. SECURITY CONSIDERATIONS
+================================================================================
+Cart:
+- Validate user ownership (check token)
+- Sanitize product data
+- Prevent cart tampering (client can't change prices)
+- Rate limit add to cart API
+
+Products:
+- Validate images (file type, size)
+- Sanitize descriptions (XSS prevention)
+- Check seller ownership
+- Validate price (must be > 0)
+
+Admin Moderation:
+- Check admin role on every action
+- Log all approvals/rejections
+- Require rejection reason
+- Prevent duplicate actions
+
+================================================================================
+HẾT - TỔNG HỢP CÁC CHỨC NĂNG LÊ QUANG HUY (2331540305)
+================================================================================

@@ -1,0 +1,13 @@
+{
+	"folders": [
+		{
+			"name": "UDTM",
+			"path": "../../.."
+		},
+		{
+			"name": "vnpay_jsp",
+			"path": "../../../../../../Downloads/vnpay_jsp"
+		}
+	],
+	"settings": {}
+}

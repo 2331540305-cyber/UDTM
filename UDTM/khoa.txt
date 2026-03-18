@@ -1,0 +1,413 @@
+================================================================================
+TÓM TẮT CÁC CHỨC NĂNG THỰC HIỆN - TRẦN NGUYỄN ANH KHOA (2331540050)
+================================================================================
+
+================================================================================
+1. CHỨC NĂNG: Đăng ký, Đăng nhập
+================================================================================
+Mức độ sử dụng AI: 25%
+Mức độ hiểu biết/chỉnh sửa: Chỉnh validation + token
+
+File Code Liên Quan:
+- Backend:
+  • /backend/src/controllers/authController.js
+  • /backend/src/routes/authRoutes.js
+  • /backend/src/middleware/authMiddleware.js
+  • /backend/src/models/userModel.js
+
+- Frontend:
+  • /frontend/src/pages/LoginPage.js
+  • /frontend/src/pages/RegisterPage.js
+  • /frontend/src/services/api.js
+
+Luồng Hoạt Động:
+1. User truy cập trang Login/Register
+2. Nhập email/password hoặc form đăng ký
+3. Frontend gửi POST request tới API
+4. Backend validate và tạo JWT token
+5. Token lưu vào localStorage
+6. Redirect tới trang chủ
+7. authMiddleware check token trên mỗi request
+
+Chỉnh Sửa Thêm:
+- Thêm validation email format
+- Thêm password strength check
+- Xử lý lỗi timeout token
+- Refresh token mechanism
+
+================================================================================
+2. CHỨC NĂNG: UI Product Detail (Người Mua)
+================================================================================
+Mức độ sử dụng AI: 30%
+Mức độ hiểu biết/chỉnh sửa: Format dữ liệu, xử lý lỗi
+
+File Code Liên Quan:
+- Frontend:
+  • /frontend/src/pages/ProductDetailPage.js
+  • /frontend/src/components/ProductItem.js
+  • /frontend/src/services/productService.js
+
+- Backend:
+  • /backend/src/controllers/productController.js
+  • /backend/src/routes/productRoutes.js
+  • /backend/src/models/productModel.js
+
+Luồng Hoạt Động:
+1. Buyer click vào sản phẩm từ danh sách
+2. Navigate tới ProductDetailPage với product_id
+3. Frontend fetch chi tiết sản phẩm từ API
+4. Hiển thị:
+   - Hình ảnh/video sản phẩm
+   - Tên, giá, mô tả, thông số kỹ thuật
+   - Tình trạng kho (stock)
+   - Nút "Thêm vào giỏ"
+5. Buyer click "Thêm vào giỏ" → add vào cart
+6. Hiển thị notification thành công
+
+Chỉnh Sửa Thêm:
+- Format giá tiền VND locale
+- Xử lý error khi sản phẩm deleted
+- Cache dữ liệu để tối ưu performance
+- Hiển thị review/rating (đã xóa theo yêu cầu)
+
+================================================================================
+3. CHỨC NĂNG: Seller Xác Nhận / Hủy Đơn
+================================================================================
+Mức độ sử dụng AI: 35%
+Mức độ hiểu biết/chỉnh sửa: Hiểu luồng trạng thái
+
+File Code Liên Quan:
+- Backend:
+  • /backend/src/controllers/sellerController.js
+  • /backend/src/routes/sellerRoutes.js
+  • /backend/src/models/orderModel.js
+  • /backend/src/models/paymentModel.js
+
+- Frontend:
+  • /frontend/src/pages/SellerDashboardPage.js
+  • /frontend/src/components/OrderCard.js
+
+Luồng Hoạt Động - Xác Nhận Đơn (Approve Order):
+1. Seller đăng nhập → SellerDashboardPage
+2. Tab "Orders" hiển thị danh sách đơn hàng
+3. Đơn có payment_status = "pending" → nút "Duyệt đơn" hiển thị
+4. Seller click "Duyệt đơn"
+   ↓
+5. API call: PATCH /api/seller/orders/{orderId}/approve
+   ↓
+6. Backend:
+   - Verify seller có items trong đơn
+   - Cập nhật Order: payment_status "pending" → "paid"
+   - Cập nhật Order: order_status "pending" → "confirmed"
+   - Cập nhật Payment record: status → "success"
+   ↓
+7. Frontend update UI:
+   - Nút "Duyệt đơn" ẩn
+   - Trạng thái hiển thị "Đã thanh toán"
+   ↓
+8. Buyer thấy timeline update: step 1→2, payment confirmed
+
+Luồng Hoạt Động - Cập Nhật Trạng Thái Đơn (Update Status):
+1. Seller đã approve đơn (payment_status = "paid")
+2. Dropdown "Trạng thái" visible trên order card
+   • confirmed (Đã xác nhận)
+   • shipping (Đang giao)
+   • completed (Hoàn thành)
+   • canceled (Hủy)
+3. Seller chọn status mới từ dropdown
+   ↓
+4. API call: PATCH /api/seller/orders/{orderId}/status
+   • Body: { order_status: "shipping" | "completed" | ... }
+   ↓
+5. Backend:
+   - Verify seller có items trong đơn
+   - Validate status trong whitelist
+   - Cập nhật Order.order_status
+   ↓
+6. Frontend update UI:
+   - Dropdown close
+   - Status label cập nhật
+   ↓
+7. Buyer thấy timeline update tự động (3s auto-refresh):
+   - step 1 xanh ✓
+   - step 2 xanh ✓
+   - step 3 vàng (current - shipping) ⏳
+   - step 4 xám (pending)
+
+Luồng Hoạt Động - Hủy Đơn:
+1. Seller chọn status "canceled"
+2. API update order_status → "canceled"
+3. Order hiển thị status "Hủy" (đỏ)
+4. Buyer thấy order bị hủy
+
+Chỉnh Sửa Thêm:
+- Thêm confirmation dialog trước approve/update
+- Log mỗi thay đổi vào AdminLog
+- Notify buyer khi status thay đổi (email/push)
+- Prevent duplicate approval
+- Validate trạng thái transition logic
+
+================================================================================
+4. CHỨC NĂNG: Admin Quản Lý Người Dùng
+================================================================================
+Mức độ sử dụng AI: 30%
+Mức độ hiểu biết/chỉnh sửa: Phân trang + tìm kiếm
+
+File Code Liên Quan:
+- Backend:
+  • /backend/src/controllers/userController.js
+  • /backend/src/routes/userRoutes.js
+  • /backend/src/models/userModel.js
+  • /backend/src/models/adminLogModel.js
+
+- Frontend:
+  • /frontend/src/pages/AdminUsersPage.js
+  • /frontend/src/components/UserCard.js
+
+Luồng Hoạt Động - Xem Danh Sách Người Dùng:
+1. Admin login → AdminDashboardPage
+2. Click tab "Người dùng" → AdminUsersPage
+   ↓
+3. Frontend fetch: GET /api/users?page=1&limit=10&search=...
+   ↓
+4. Backend:
+   - Verify admin role (authMiddleware)
+   - Query database với filter + search
+   - Pagination: skip, limit
+   - Return: { users: [...], total, page, pages }
+   ↓
+5. Frontend hiển thị:
+   - Danh sách user cards:
+     • Avatar
+     • Username / Email
+     • Role (buyer/seller/admin)
+     • Ngày tạo
+     • Actions (Edit/Delete)
+   - Pagination buttons (Previous/Next)
+   - Search bar
+
+Luồng Hoạt Động - Tìm Kiếm Người Dùng:
+1. Admin nhập search query (username/email)
+2. API call: GET /api/users?search={query}
+3. Backend filter users với regex search
+4. Frontend update kết quả
+
+Luồng Hoạt Động - Chỉnh Sửa Người Dùng:
+1. Admin click "Edit" trên user card
+2. Modal form hiển thị:
+   - Username, Email, Full Name
+   - Role dropdown (buyer/seller/admin)
+   - Status (active/inactive)
+3. Admin chỉnh sửa + click "Lưu"
+   ↓
+4. API call: PUT /api/users/{userId}
+   ↓
+5. Backend:
+   - Verify admin + check ownership
+   - Validate data
+   - Update user document
+   - Log action vào AdminLog
+   ↓
+6. Frontend update UI + show success message
+
+Luồng Hoạt Động - Xóa Người Dùng:
+1. Admin click "Delete" trên user card
+2. Confirm dialog: "Bạn chắc chắn xóa user này?"
+3. Confirm → API call: DELETE /api/users/{userId}
+   ↓
+4. Backend:
+   - Verify admin
+   - Soft delete (set status = inactive) hoặc Hard delete
+   - Log action vào AdminLog
+   ↓
+5. Frontend:
+   - Remove user từ list
+   - Show success notification
+
+Chỉnh Sửa Thêm:
+- Thêm phân trang (page/limit)
+- Thêm tìm kiếm advanced (by role, date range)
+- Thêm sort (name, email, date)
+- Thêm bulk actions (delete multiple)
+- Thêm user status (active/inactive/banned)
+- Thêm confirmation trước delete
+- Log mỗi thay đổi vào AdminLog
+- Thêm export user list (CSV)
+
+================================================================================
+5. CHỨC NĂNG LIÊN QUAN - ORDER MANAGEMENT (BUYER SIDE)
+================================================================================
+File Code:
+- Frontend:
+  • /frontend/src/pages/OrderListPage.js
+  • /frontend/src/pages/OrderDetailPage.js
+  • /frontend/src/pages/CheckoutPage.js
+
+- Backend:
+  • /backend/src/controllers/orderController.js
+  • /backend/src/routes/orderRoutes.js
+  • /backend/src/models/orderModel.js
+
+Luồng Hoạt Động - Buyer Đặt Hàng:
+1. Buyer add items vào giỏ từ ProductDetailPage
+2. Click giỏ hàng → CartPage
+3. Review items + Checkout
+4. CheckoutPage:
+   - Nhập thông tin giao hàng
+   - Chọn phương thức thanh toán (COD/VNPay)
+   - Click "Thanh toán"
+   ↓
+5. Backend tạo Order:
+   - order_status = "pending"
+   - payment_status = "pending"
+   - Lưu thông tin giao hàng: customer_name, customer_phone, delivery_address
+   - Tạo Payment record
+   ↓
+6. Redirect tới PaymentPage
+7. Thanh toán thành công → OrderListPage
+8. Buyer xem danh sách orders
+
+Luồng Hoạt Động - Buyer Xem Chi Tiết Đơn:
+1. OrderListPage hiển thị:
+   - Order ID, người nhận, địa chỉ
+   - Trạng thái đơn (pending/confirmed/shipping/completed)
+   - Tổng tiền
+   - Nút "Xem chi tiết"
+2. Click "Xem chi tiết" → OrderDetailPage
+   ↓
+3. OrderDetailPage hiển thị:
+   - Header: Order ID + ngày tạo
+   - Timeline trạng thái (4 bước):
+     1️⃣ Chờ xử lý (pending) - vàng nếu current
+     2️⃣ Đã xác nhận (confirmed) - xanh nếu completed
+     3️⃣ Đang giao (shipping) - vàng nếu current
+     4️⃣ Đã giao (completed) - xanh nếu completed
+   - Thông tin giao hàng:
+     • Người nhận
+     • Điện thoại
+     • Địa chỉ giao hàng
+   - Danh sách sản phẩm trong order
+   - Tổng tiền
+   ↓
+4. Auto-refresh 3 giây → Timeline update real-time
+
+================================================================================
+6. CHỨC NĂNG LIÊN QUAN - ADMIN LOGS (AUDIT SYSTEM)
+================================================================================
+File Code:
+- Backend:
+  • /backend/src/controllers/adminLogController.js
+  • /backend/src/routes/adminLogRoutes.js
+  • /backend/src/models/adminLogModel.js
+
+- Frontend:
+  • /frontend/src/pages/AdminLogsPage.js
+
+Luồng Hoạt Động:
+1. Mỗi khi admin/seller thực hiện action (edit product, delete order, etc.)
+2. System tự động log vào AdminLog:
+   - action: "create", "update", "delete", etc.
+   - target_type: "Product", "Order", "User", etc.
+   - admin_id: who did it
+   - old_data: trước khi thay đổi
+   - new_data: sau khi thay đổi
+   - ip_address, user_agent
+   - timestamp
+3. Admin xem AdminLogsPage:
+   - Filter by action, target_type, date range
+   - Search by admin_id, target_id
+   - Hiển thị chi tiết old_data vs new_data
+   - Export JSON/CSV
+
+================================================================================
+7. CÔNG NGHỆ STACK
+================================================================================
+Backend:
+- Runtime: Node.js + Express.js
+- Database: MongoDB + Mongoose
+- Authentication: JWT (token-based)
+- Middleware: authMiddleware, errorHandler
+
+Frontend:
+- Framework: React 18
+- Router: React Router v6
+- HTTP Client: Axios
+- Styling: Tailwind CSS
+- State Management: React Hooks (useState, useEffect)
+- Auto-refresh: setInterval polling (3s, 5s)
+
+================================================================================
+8. KEY FEATURES IMPLEMENTED
+================================================================================
+✅ JWT Authentication + Role-based Access (admin/seller/buyer)
+✅ Product Management (list, detail, search)
+✅ Shopping Cart + Checkout
+✅ Order Management (create, view, track status)
+✅ Seller Order Processing (approve, update status)
+✅ Real-time Status Timeline (auto-refresh)
+✅ Admin User Management (CRUD + pagination + search)
+✅ Admin Logs System (audit trail)
+✅ Payment Integration (COD, VNPay)
+✅ Responsive UI (Tailwind CSS)
+
+================================================================================
+9. DATABASE MODELS
+================================================================================
+User:
+- user_id, username, email, password (hashed), full_name, phone, address
+- role: "admin" | "seller" | "buyer"
+- created_at, updated_at
+
+Product:
+- product_id, name, price, description, category, seller_id
+- stock, status (active/inactive), image, trailer
+- created_at, updated_at
+
+Order:
+- order_id, user_id, items (array), total_amount
+- payment_method, payment_status, order_status
+- customer_name, customer_phone, delivery_address
+- created_at, updated_at
+
+Payment:
+- payment_id, order_id, user_id, amount, method, status
+
+AdminLog:
+- log_id, action, target_type, admin_id, old_data, new_data
+- ip_address, user_agent, created_at
+
+================================================================================
+10. API ENDPOINTS (Key)
+================================================================================
+Auth:
+- POST /api/auth/register
+- POST /api/auth/login
+- POST /api/auth/logout
+
+Products:
+- GET /api/products (list)
+- GET /api/products/:id (detail)
+- POST /api/products (create - admin/seller)
+- PUT/PATCH /api/products/:id (update)
+- DELETE /api/products/:id (delete)
+
+Orders:
+- POST /api/orders (create)
+- GET /api/orders/my (user orders)
+- GET /api/orders/:id (detail)
+- PATCH /api/seller/orders/:orderId/approve (seller approve payment)
+- PATCH /api/seller/orders/:orderId/status (seller update status)
+
+Users (Admin):
+- GET /api/users (list with pagination)
+- POST /api/users (create)
+- PUT /api/users/:id (update)
+- DELETE /api/users/:id (delete)
+
+Admin Logs:
+- GET /api/admin-logs (list)
+- GET /api/admin-logs/:id (detail)
+
+================================================================================
+HẾT - TỔNG HỢP CÁC CHỨC NĂNG TRẦN NGUYỄN ANH KHOA (2331540050)
+================================================================================
